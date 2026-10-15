@@ -52,3 +52,14 @@ def test_parity():
     a, b = torch.zeros(5, 8, 8, 3), torch.zeros(4, 8, 8, 3)
     assert conform.parity(a, a) == []
     assert conform.parity(a, b)
+
+
+@pytest.mark.parametrize("n,fps,sr", [(100, 25.0, 48000), (121, 24.0, 44100)])
+def test_restore_audio_exact_duration(n, fps, sr):
+    x = torch.rand(n, 32, 32, 3)
+    padded, info = conform.prepare(x)
+    long_audio = {"waveform": torch.rand(1, 2, int(padded.shape[0] / fps * sr)), "sample_rate": sr}
+    out = conform.restore_audio(long_audio, info, fps)
+    assert out["waveform"].shape[-1] == round(n / fps * sr)
+    short = {"waveform": torch.rand(1, 2, 10), "sample_rate": sr}
+    assert conform.restore_audio(short, info, fps)["waveform"].shape[-1] == round(n / fps * sr)

@@ -88,13 +88,32 @@ class KrishFrameParityCheck:
         return (result, msg)
 
 
+class KrishLTXAudioRestore:
+    """Trim LTX audio (generated for the padded length) to exactly the original duration."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"audio": ("AUDIO",), "conform_info": ("KRISH_CONFORM",),
+                             "fps": ("FLOAT", {"default": 24.0, "min": 0.01, "max": 1000.0})}}
+
+    RETURN_TYPES = ("AUDIO",)
+    RETURN_NAMES = ("audio",)
+    FUNCTION = "run"
+    CATEGORY = CATEGORY
+
+    def run(self, audio, conform_info, fps):
+        return (conform.restore_audio(audio, conform_info, fps),)
+
+
 NODE_CLASS_MAPPINGS = {
     "KrishLTXFramePrep": KrishLTXFramePrep,
     "KrishLTXFrameRestore": KrishLTXFrameRestore,
     "KrishFrameParityCheck": KrishFrameParityCheck,
+    "KrishLTXAudioRestore": KrishLTXAudioRestore,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "KrishLTXFramePrep": "Krish LTX Frame Prep (pad to grid)",
     "KrishLTXFrameRestore": "Krish LTX Frame Restore (exact N frames)",
     "KrishFrameParityCheck": "Krish Frame Parity Check",
+    "KrishLTXAudioRestore": "Krish LTX Audio Restore (exact duration)",
 }

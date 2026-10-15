@@ -158,3 +158,15 @@ def parity(a, b, atol=None):
     if a.shape[3] != b.shape[3]:
         problems.append(f"channels {a.shape[3]} vs {b.shape[3]}")
     return problems
+
+
+def restore_audio(audio, info, fps):
+    """Trim/zero-pad an AUDIO dict to exactly orig_frames / fps seconds."""
+    wav, sr = audio["waveform"], int(audio["sample_rate"])
+    target = int(round(info.orig_frames / float(fps) * sr))
+    t = wav.shape[-1]
+    if t > target:
+        wav = wav[..., :target]
+    elif t < target:
+        wav = F.pad(wav, (0, target - t))
+    return {"waveform": wav, "sample_rate": sr}
