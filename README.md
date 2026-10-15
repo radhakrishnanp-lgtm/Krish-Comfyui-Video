@@ -6,7 +6,7 @@ LTX needs 8n+1 frames and width/height divisible by 32. ComfyUI's LTX nodes crop
 so frames get lost and the duration drifts. These nodes pad onto the grid before sampling and trim after.
 
 ## Install
-Copy or symlink `krish_frame_conform/` into `ComfyUI/custom_nodes/` and restart.
+Copy the whole `Krish-Comfyui-Video` folder into `ComfyUI/custom_nodes/` and restart.
 
 ## Workflow
 ```
