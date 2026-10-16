@@ -52,3 +52,8 @@ The step count, CFG and sampler are starting values, not tuned for 2.5. If you r
 `workflows/LTX_2.5_Matte_Gen_NoAudio_Krish.json` (`python3 tools/patch_matte_no_audio.py <original.json> <out.json>`):
 no audio decode/save/export; **Krish Matte Frame-to-Frame Check** (count, NaN/Inf, range, time shift, duplicated frames,
 isolated dropouts, flicker spikes) plus a FINAL parity check of the deliverable against the original loaded frames.
+
+Matte check notes: count, NaN/Inf, range, duplicated frames and isolated dropouts always stop the run on failure.
+The time-shift test compares each matte frame's edge structure with the source frames around it and needs strong,
+consistent evidence; by default (`alignment: warn`) it only reports. Set `alignment: strict` to make it stop the run.
+Prep only pads the tail and Restore trims it, so these nodes cannot shift frames; the test exists to catch the model.

@@ -85,7 +85,7 @@ px, py = parity1["pos"]
 check = new_node("KrishMatteFrameCheck", [px, py + 200], [320, 130],
                  [inp("source", "IMAGE"), inp("result", "IMAGE")],
                  [("result", "IMAGE"), ("report", "STRING"), ("flagged_frames", "STRING")],
-                 ["error", 4], "Krish Matte Frame-to-Frame Check")
+                 ["error", 4, "warn"], "Krish Matte Frame-to-Frame Check")
 final = new_node("KrishFrameParityCheck", [scale["pos"][0] + 320, scale["pos"][1]], [300, 130],
                  [inp("source", "IMAGE"), inp("result", "IMAGE")],
                  [("result", "IMAGE"), ("report", "STRING")], ["error"], "Krish FINAL Parity (vs original)")

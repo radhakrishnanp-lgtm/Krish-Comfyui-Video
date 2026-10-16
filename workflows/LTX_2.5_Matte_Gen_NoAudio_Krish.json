@@ -2411,7 +2411,8 @@
       },
       "widgets_values": [
         "error",
-        4
+        4,
+        "warn"
       ],
       "color": "#2a4a3a",
       "bgcolor": "#1f3a2c"

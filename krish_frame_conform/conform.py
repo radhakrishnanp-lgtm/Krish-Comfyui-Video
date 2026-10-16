@@ -213,12 +213,58 @@ def _lagged_corr(a, b, lag):
     return float((x * y).sum()) / den if den > 1e-12 else None
 
 
-def temporal_check(source, result, max_lag=4, lag_margin=0.1, spike_thr=0.15):
+def _edges(g):
+    dx = (g[:, :, 1:] - g[:, :, :-1])[:, :-1, :]
+    dy = (g[:, 1:, :] - g[:, :-1, :])[:, :, :-1]
+    return dx.abs() + dy.abs()
+
+
+def _frame_corr(a, b):
+    a, b = a.flatten(1), b.flatten(1)
+    a, b = a - a.mean(1, keepdim=True), b - b.mean(1, keepdim=True)
+    return (a * b).sum(1) / (a.norm(dim=1) * b.norm(dim=1)).clamp_min(1e-8)
+
+
+def _alignment(gs, gm, max_lag):
+    """Does matte frame t line up with source frame t better than with t+k?
+
+    Per-frame edge-structure correlation, compared on the SAME frames for every lag (paired), so the verdict
+    rests on how consistently a lag wins, not on one noisy global number.
+    Returns (verdict, info); verdict in {"ok", "weak", "strong", "skipped"}.
+    """
+    n = gs.shape[0]
+    L = max_lag
+    if L == 0 or n < 2 * L + 8:
+        return "skipped", {"skip_reason": "clip too short for the lag test"}
+    es, em = _edges(gs), _edges(gm)
+    ts = torch.arange(L, n - L)
+    base = _frame_corr(em[ts], es[ts])
+    if float(base.std()) < 1e-4 and float((es[ts].flatten(1).std(1)).max()) < 1e-4:
+        return "skipped", {"skip_reason": "source has no structure to compare"}
+    best = None
+    for k in range(-L, L + 1):
+        if k == 0:
+            continue
+        gain = _frame_corr(em[ts], es[ts + k]) - base
+        mean, frac = float(gain.mean()), float((gain > 0).float().mean())
+        t = mean / (float(gain.std()) / len(ts) ** 0.5 + 1e-9)
+        if best is None or mean > best["mean_gain"]:
+            best = {"best_lag": k, "mean_gain": mean, "frac_better": frac, "t": t}
+    info = dict(best, corr_at_0=round(float(base.mean()), 3))
+    if best["mean_gain"] > 0.05 and best["frac_better"] >= 0.8 and best["t"] >= 4:
+        return "strong", info
+    if best["mean_gain"] > 0.02 and best["frac_better"] >= 0.65 and best["t"] >= 2.5:
+        return "weak", info
+    return "ok", info
+
+
+def temporal_check(source, result, max_lag=4, spike_thr=0.15, alignment="warn"):
     """Frame-to-frame sanity checks of a generated matte against its source.
 
     Returns (problems, warnings, info). `problems` are hard failures (wrong count, NaN/Inf, out of range,
-    frames shifted in time, duplicated frames, isolated empty frames); `warnings` are soft (flicker spikes,
-    static clips). Frame indices are 0-based.
+    duplicated frames, isolated empty frames); `warnings` are soft (flicker spikes, weak/short/static
+    alignment evidence). `alignment`: "off" | "warn" (strong evidence of a time shift is only a warning) |
+    "strict" (strong evidence is a failure). Frame indices are 0-based.
     """
     problems, warnings, info = [], [], {}
     n = result.shape[0]
@@ -242,8 +288,10 @@ def temporal_check(source, result, max_lag=4, lag_margin=0.1, spike_thr=0.15):
     info["mean_coverage"] = [round(float(m), 4) for m in means[: min(n, 5)]]
 
     # exact duplicate frames in the result that are NOT duplicates in the source
+    # (constant frames such as an all-empty matte are legitimately identical and are not counted)
     dups = [t for t in range(1, n)
-            if torch.equal(result[t], result[t - 1]) and not torch.equal(source[t], source[t - 1])]
+            if torch.equal(result[t], result[t - 1]) and float(result[t].float().std()) > 1e-3
+            and float((source[t].float() - source[t - 1].float()).abs().mean()) > 0.002]
     if dups:
         problems.append(f"duplicated result frames (held/repeated) at {dups[:20]}")
 
@@ -266,24 +314,17 @@ def temporal_check(source, result, max_lag=4, lag_margin=0.1, spike_thr=0.15):
     if spikes:
         warnings.append(f"coverage spikes (possible flicker) at {spikes[:20]}")
 
-    # temporal alignment: motion energy of result must line up with motion energy of source
-    gs, gr = _small_gray(source), _small_gray(result)
-    ms = (gs[1:] - gs[:-1]).abs().mean(dim=(1, 2))
-    mr = (gr[1:] - gr[:-1]).abs().mean(dim=(1, 2))
-    if n < 8 or float(ms.std()) < 1e-5:
-        warnings.append("alignment check skipped (clip too short or source is static)")
-    else:
-        corrs = {l: _lagged_corr(ms, mr, l) for l in range(-max_lag, max_lag + 1)}
-        valid = {l: c for l, c in corrs.items() if c is not None}
-        info["lag_corr"] = {l: round(c, 3) for l, c in valid.items()}
-        c0 = valid.get(0)
-        if c0 is None:
-            warnings.append("result has no motion; alignment could not be verified")
-        else:
-            best_lag = max(valid, key=valid.get)
-            if best_lag != 0 and valid[best_lag] - c0 > lag_margin:
-                problems.append(f"frames shifted in time: result best matches source at lag {best_lag:+d} "
-                                f"(corr {valid[best_lag]:.2f} vs {c0:.2f} at lag 0)")
-            info["best_lag"] = best_lag
-            info["corr_at_0"] = round(c0, 3)
+    # temporal alignment (see _alignment): per-frame structure test, needs strong evidence to fail
+    if alignment != "off":
+        verdict, ainfo = _alignment(_small_gray(source, 96), _small_gray(result, 96), max_lag)
+        info.update(ainfo)
+        if verdict == "strong":
+            msg = (f"frames look shifted in time: matte frame t matches source frame t{ainfo['best_lag']:+d} "
+                   f"(better than lag 0 in {ainfo['frac_better']:.0%} of frames, mean +{ainfo['mean_gain']:.3f})")
+            (problems if alignment == "strict" else warnings).append(msg)
+        elif verdict == "weak":
+            warnings.append(f"possible small time offset (lag {ainfo['best_lag']:+d}), evidence is weak: "
+                            f"better in {ainfo['frac_better']:.0%} of frames, mean +{ainfo['mean_gain']:.3f}")
+        elif verdict == "skipped":
+            warnings.append("alignment check skipped: " + ainfo["skip_reason"])
     return problems, warnings, info

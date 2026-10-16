@@ -83,47 +83,90 @@ def test_audio_accepts_2d_waveform():
     assert conform.restore_audio(a, info, 24.0)["waveform"].dim() == 3
 
 
-def _moving_square(n=40, size=48, seed=0):
+def _scene(n=40, size=96, seed=0):
+    """Textured background drifting like a handheld camera + a foreground blob; returns (source, matte)."""
     g = torch.Generator().manual_seed(seed)
-    steps = torch.rand(n, generator=g) * 3 + (torch.arange(n) % 5 == 0) * 4  # varied speed -> structured motion
-    pos = steps.cumsum(0) % (size - 10)
-    x = torch.zeros(n, size, size, 3)
+    bg = torch.rand(size + 40, size + 40, generator=g)
+    bg = torch.nn.functional.avg_pool2d(bg[None, None], 3, 1, 1)[0, 0]
+    cam = (torch.randn(n, 2, generator=g).cumsum(0) * 0.8).round().long().clamp(-15, 15) + 20
+    ph = torch.rand(2, generator=g) * 6.28
+    fr = 0.12 + torch.rand(2, generator=g) * 0.25
+    tt = torch.arange(n).float()
+    pos = torch.stack([48 + 22 * torch.sin(fr[0] * tt + ph[0]), 48 + 22 * torch.sin(fr[1] * tt + ph[1])], 1)
+    pos = pos + torch.randn(n, 2, generator=g) * 1.0
+    src = torch.zeros(n, size, size, 3)
+    matte = torch.zeros(n, size, size, 3)
+    yy, xx = torch.meshgrid(torch.arange(size), torch.arange(size), indexing="ij")
     for t in range(n):
-        p = int(pos[t])
-        x[t, 8:18, p:p + 10, :] = 1.0
-    return x
+        frame = bg[cam[t, 0]:cam[t, 0] + size, cam[t, 1]:cam[t, 1] + size]
+        blob = (((yy - pos[t, 0]) ** 2 + (xx - pos[t, 1]) ** 2) < 12 ** 2).float()
+        blob = torch.nn.functional.avg_pool2d(blob[None, None], 3, 1, 1)[0, 0]
+        src[t] = (frame * (1 - blob) + 0.9 * blob)[..., None]
+        matte[t] = blob[..., None]
+    return src, matte
 
 
-def test_temporal_check_passes_when_aligned():
-    src = _moving_square()
-    problems, warnings, info = conform.temporal_check(src, src.clone())
-    assert problems == [] and info["best_lag"] == 0
+@pytest.mark.parametrize("n", [17, 39, 121])
+def test_aligned_matte_never_hard_fails(n):
+    for seed in range(8):
+        src, matte = _scene(n, seed=seed)
+        problems, warnings, _ = conform.temporal_check(src, matte, alignment="strict")
+        assert problems == [], (n, seed, problems)
 
 
-def test_temporal_check_detects_time_shift():
-    src = _moving_square()
-    shifted = torch.cat([src[:1], src[:1], src[:-2]])  # result lags the source by 1 frame
-    problems, _, _ = conform.temporal_check(src, shifted, max_lag=3)
-    assert any("shifted" in p or "duplicated" in p for p in problems)
-    shifted2 = torch.roll(src, 2, dims=0)
-    problems, _, info = conform.temporal_check(src, shifted2, max_lag=4)
-    assert any("shifted" in p for p in problems)
+@pytest.mark.parametrize("shift", [2, -2, 3])
+def test_shifted_matte_is_caught_in_strict_and_only_warned_in_warn_mode(shift):
+    caught = 0
+    for seed in range(8):
+        src, matte = _scene(60, seed=seed)
+        late = torch.roll(matte, shift, dims=0)
+        strict = conform.temporal_check(src, late, alignment="strict")[0]
+        lenient = conform.temporal_check(src, late, alignment="warn")[0]
+        assert not any("shifted" in p for p in lenient)
+        caught += any("shifted" in p for p in strict)
+    assert caught >= 7, caught
+
+
+def test_alignment_skips_short_and_static_clips():
+    src, matte = _scene(6)
+    assert conform.temporal_check(src, matte, alignment="strict")[0] == []
+    static = torch.full((30, 48, 48, 3), 0.5)
+    assert conform.temporal_check(static, static.clone(), alignment="strict")[0] == []
 
 
 def test_temporal_check_detects_duplicates_dropout_nan_and_count():
-    src = _moving_square()
-    dup = src.clone()
+    src, matte = _scene(40, seed=1)
+    dup = matte.clone()
     dup[10] = dup[9]
     assert any("duplicated" in p for p in conform.temporal_check(src, dup)[0])
-    drop = src.clone()
+    drop = matte.clone()
     drop[20] = 0
     assert any("dropout" in p for p in conform.temporal_check(src, drop)[0])
-    nan = src.clone()
+    nan = matte.clone()
     nan[5, 3, 3, 0] = float("nan")
     assert any("non-finite" in p for p in conform.temporal_check(src, nan)[0])
-    assert any("frame count" in p for p in conform.temporal_check(src, src[:-1])[0])
+    assert any("frame count" in p for p in conform.temporal_check(src, matte[:-1])[0])
 
 
 def test_temporal_check_flags_out_of_range():
-    src = _moving_square()
-    assert any("range" in p for p in conform.temporal_check(src, src * 2)[0])
+    src, matte = _scene(40, seed=2)
+    assert any("range" in p for p in conform.temporal_check(src, matte * 2)[0])
+
+
+@pytest.mark.parametrize("n", [1, 2, 7, 8, 9, 10, 39, 40, 41, 100, 121, 122])
+@pytest.mark.parametrize("h,w", [(5, 7), (33, 47), (64, 64), (45, 80), (31, 33)])
+def test_any_duration_and_size_roundtrip_through_full_chain(n, h, w):
+    x = torch.rand(n, h, w, 3)
+    padded, info = conform.prepare(x)
+    assert (padded.shape[0] - 1) % 8 == 0 and padded.shape[1] % 32 == 0 and padded.shape[2] % 32 == 0
+    model_out = padded.mean(-1, keepdim=True).repeat(1, 1, 1, 3)  # stand-in for the matte the model returns
+    out, _ = conform.restore(model_out, info)
+    assert out.shape == x.shape
+    assert conform.parity(x, out) == []
+
+
+def test_empty_matte_frames_are_not_flagged_as_duplicates():
+    src, matte = _scene(40, seed=3)
+    matte[10:14] = 0  # subject leaves frame: several identical all-black frames
+    problems = conform.temporal_check(src, matte)[0]
+    assert not any("duplicated" in p for p in problems)

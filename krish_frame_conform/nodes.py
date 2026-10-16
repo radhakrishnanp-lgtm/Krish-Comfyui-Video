@@ -97,6 +97,8 @@ class KrishMatteFrameCheck:
             "source": ("IMAGE",), "result": ("IMAGE",),
             "on_fail": (["error", "warn"],),
             "max_lag": ("INT", {"default": 4, "min": 0, "max": 24, "tooltip": "Frames of shift to test for."}),
+            "alignment": (["warn", "strict", "off"], {"tooltip": "warn: a detected time shift is reported but does "
+                           "not stop the run. strict: it stops the run. off: skip the test."}),
         }}
 
     RETURN_TYPES = ("IMAGE", "STRING", "STRING")
@@ -104,11 +106,13 @@ class KrishMatteFrameCheck:
     FUNCTION = "run"
     CATEGORY = CATEGORY
 
-    def run(self, source, result, on_fail, max_lag):
-        problems, warnings, info = conform.temporal_check(source, result, max_lag=max_lag)
+    def run(self, source, result, on_fail, max_lag, alignment="warn"):
+        problems, warnings, info = conform.temporal_check(source, result, max_lag=max_lag, alignment=alignment)
         lines = [f"frames: {result.shape[0]}  size: {result.shape[2]}x{result.shape[1]}"]
         if "best_lag" in info:
-            lines.append(f"alignment: best lag {info['best_lag']:+d}, corr@0 {info['corr_at_0']}")
+            lines.append(f"alignment: strongest alternative lag {info['best_lag']:+d} "
+                         f"(gain {info['mean_gain']:+.3f}, better in {info['frac_better']:.0%} of frames), "
+                         f"corr@0 {info['corr_at_0']}")
         lines += [f"FAIL: {p}" for p in problems] + [f"WARN: {w}" for w in warnings]
         if not problems:
             lines.insert(1, "OK: all frame-to-frame checks passed")
