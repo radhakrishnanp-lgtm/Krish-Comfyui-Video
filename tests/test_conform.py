@@ -63,3 +63,13 @@ def test_restore_audio_exact_duration(n, fps, sr):
     assert out["waveform"].shape[-1] == round(n / fps * sr)
     short = {"waveform": torch.rand(1, 2, 10), "sample_rate": sr}
     assert conform.restore_audio(short, info, fps)["waveform"].shape[-1] == round(n / fps * sr)
+
+
+def test_prepare_audio_matches_padded_video_then_restores():
+    x = torch.rand(100, 32, 32, 3)
+    padded, info = conform.prepare(x)
+    src = {"waveform": torch.rand(1, 2, 100 * 48000 // 25), "sample_rate": 48000}
+    pa = conform.prepare_audio(src, info, 25.0)
+    assert pa["waveform"].shape[-1] == round(info.padded_frames / 25.0 * 48000)
+    back = conform.restore_audio(pa, info, 25.0)
+    assert torch.equal(back["waveform"], src["waveform"])

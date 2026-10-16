@@ -170,3 +170,15 @@ def restore_audio(audio, info, fps):
     elif t < target:
         wav = F.pad(wav, (0, target - t))
     return {"waveform": wav, "sample_rate": sr}
+
+
+def prepare_audio(audio, info, fps):
+    """Zero-pad (or trim) an AUDIO dict to padded_frames / fps seconds, matching the padded video."""
+    wav, sr = audio["waveform"], int(audio["sample_rate"])
+    target = int(round(info.padded_frames / float(fps) * sr))
+    t = wav.shape[-1]
+    if t > target:
+        wav = wav[..., :target]
+    elif t < target:
+        wav = F.pad(wav, (0, target - t))
+    return {"waveform": wav, "sample_rate": sr}
