@@ -170,3 +170,27 @@ def test_empty_matte_frames_are_not_flagged_as_duplicates():
     matte[10:14] = 0  # subject leaves frame: several identical all-black frames
     problems = conform.temporal_check(src, matte)[0]
     assert not any("duplicated" in p for p in problems)
+
+
+def _load_pack():
+    import sys
+    root = pathlib.Path(__file__).parents[1]
+    spec = importlib.util.spec_from_file_location("krish_pack", root / "__init__.py",
+                                                  submodule_search_locations=[str(root)])
+    m = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = m
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_matte_check_node_never_blocks_in_warn_mode():
+    node = _load_pack().NODE_CLASS_MAPPINGS["KrishMatteFrameCheck"]()
+    src, matte = _scene(40, seed=5)
+    out, report, _ = node.run(src, torch.roll(matte, 3, dims=0), "warn", 4, "strict")
+    assert out.shape == matte.shape
+    out, report, _ = node.run(src, matte[:-1], "warn", 4, "warn")  # count mismatch: report, don't raise
+    assert "FAIL" in report
+    out, report, _ = node.run(src, torch.rand(40, 4), "warn", 4, "warn")  # garbage input: still passes through
+    assert "could not run" in report
+    with pytest.raises(ValueError):
+        node.run(src, matte[:-1], "error", 4, "warn")

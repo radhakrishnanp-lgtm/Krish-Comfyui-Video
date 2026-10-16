@@ -2230,6 +2230,7 @@
           "name": "result",
           "type": "IMAGE",
           "links": [
+            13934,
             13960
           ]
         },
@@ -2388,9 +2389,7 @@
         {
           "name": "result",
           "type": "IMAGE",
-          "links": [
-            13934
-          ]
+          "links": []
         },
         {
           "name": "report",
@@ -2405,12 +2404,12 @@
           "links": []
         }
       ],
-      "title": "Krish Matte Frame-to-Frame Check",
+      "title": "Krish Matte Check (report only)",
       "properties": {
         "Node name for S&R": "KrishMatteFrameCheck"
       },
       "widgets_values": [
-        "error",
+        "warn",
         4,
         "warn"
       ],
@@ -2857,7 +2856,7 @@
     ],
     [
       13934,
-      9127,
+      9119,
       0,
       9109,
       0,

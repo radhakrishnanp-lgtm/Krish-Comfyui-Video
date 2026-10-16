@@ -5,7 +5,7 @@ Usage: python3 tools/patch_matte_no_audio.py <original.json> <patched.json>
   1. Audio removed from the deliverable: LTXVAudioVAEDecode, its links and the stray LoadAudio node are deleted;
      CreateVideo gets no audio. (An EMPTY audio latent is still built inside the Preprocess subgraph because the
      LTX-2 model is a joint audio-video model; it is never decoded, saved or exported.)
-  2. Krish Matte Frame-to-Frame Check after the existing Parity Check (source = resized original):
+  2. Krish Matte Frame-to-Frame Check as a report-only side branch (never blocks the frames; source = resized original):
      count, NaN/Inf, range, time shift (lag test), duplicated frames, isolated dropouts, flicker spikes.
   3. Second Krish Parity Check at the very end: final output vs the ORIGINAL loaded frames
      (same frame count, width, height, channels as the clip you gave it).
@@ -85,7 +85,7 @@ px, py = parity1["pos"]
 check = new_node("KrishMatteFrameCheck", [px, py + 200], [320, 130],
                  [inp("source", "IMAGE"), inp("result", "IMAGE")],
                  [("result", "IMAGE"), ("report", "STRING"), ("flagged_frames", "STRING")],
-                 ["error", 4, "warn"], "Krish Matte Frame-to-Frame Check")
+                 ["warn", 4, "warn"], "Krish Matte Check (report only)")
 final = new_node("KrishFrameParityCheck", [scale["pos"][0] + 320, scale["pos"][1]], [300, 130],
                  [inp("source", "IMAGE"), inp("result", "IMAGE")],
                  [("result", "IMAGE"), ("report", "STRING")], ["error"], "Krish FINAL Parity (vs original)")
@@ -97,8 +97,8 @@ save_seq = new_node("SaveImageAdvanced", [mkvideo["pos"][0], mkvideo["pos"][1] +
                     ["LTX_Matte/matte", "png", "16-bit", "sRGB"], "Save matte PNG sequence (16-bit)", None)
 
 # parity1 -> matte check -> ImageScale
+# the matte check is a SIDE report: ImageScale keeps reading Parity #1, so QC can never block the frames
 connect(resize, 0, check, "source")
-reroute_origin(13934, check, 0)           # ImageScale.image now reads the checked frames
 connect(parity1, 0, check, "result")
 connect(check, 1, rep_a, "source")
 # ImageScale -> FINAL parity (vs original loaded frames) -> CreateVideo + PNG sequence

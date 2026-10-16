@@ -95,7 +95,7 @@ class KrishMatteFrameCheck:
     def INPUT_TYPES(cls):
         return {"required": {
             "source": ("IMAGE",), "result": ("IMAGE",),
-            "on_fail": (["error", "warn"],),
+            "on_fail": (["warn", "error"],),
             "max_lag": ("INT", {"default": 4, "min": 0, "max": 24, "tooltip": "Frames of shift to test for."}),
             "alignment": (["warn", "strict", "off"], {"tooltip": "warn: a detected time shift is reported but does "
                            "not stop the run. strict: it stops the run. off: skip the test."}),
@@ -107,7 +107,14 @@ class KrishMatteFrameCheck:
     CATEGORY = CATEGORY
 
     def run(self, source, result, on_fail, max_lag, alignment="warn"):
-        problems, warnings, info = conform.temporal_check(source, result, max_lag=max_lag, alignment=alignment)
+        try:
+            problems, warnings, info = conform.temporal_check(source, result, max_lag=max_lag, alignment=alignment)
+        except Exception as e:  # a QC report must never be the reason a render is lost
+            if on_fail == "error":
+                raise
+            msg = f"matte check could not run ({type(e).__name__}: {e}); frames passed through untouched"
+            print("[KrishLTX] " + msg)
+            return (result, msg, msg)
         lines = [f"frames: {result.shape[0]}  size: {result.shape[2]}x{result.shape[1]}"]
         if "best_lag" in info:
             lines.append(f"alignment: strongest alternative lag {info['best_lag']:+d} "

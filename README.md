@@ -57,3 +57,9 @@ Matte check notes: count, NaN/Inf, range, duplicated frames and isolated dropout
 The time-shift test compares each matte frame's edge structure with the source frames around it and needs strong,
 consistent evidence; by default (`alignment: warn`) it only reports. Set `alignment: strict` to make it stop the run.
 Prep only pads the tail and Restore trims it, so these nodes cannot shift frames; the test exists to catch the model.
+
+## Updating the node pack
+ComfyUI keeps the old node code until it restarts. Pull the latest into `ComfyUI/custom_nodes/Krish-Comfyui-Video`
+(`git pull origin claude/relaxed-bardeen-xyfs5r`, or re-download the branch zip and replace the folder), restart ComfyUI,
+then load the workflow file again. In the Matte Gen workflow the matte check is a report-only side branch: it can no longer
+stop the frames. Only the Parity checks (frame count / size vs the original) can stop a run.
