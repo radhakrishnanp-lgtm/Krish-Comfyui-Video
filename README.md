@@ -41,3 +41,9 @@ Prep goes before the Source Video subgraph; Restore + Parity Check go after VAE 
 ## LTX Workflow 02 (patched)
 `workflows/LTX_Workflow_02_Krish_ExactFrames.json` (`python3 tools/patch_workflow_02.py <original.json> <out.json>`):
 Frame Prep + Audio Prep before the latent is sized, Frame Restore + Parity Check + Audio Restore after decode.
+
+## Max-quality variant (96 GB GPU)
+`workflows/LTX_Workflow_02_Krish_MaxQuality.json` (`python3 tools/make_max_quality.py <patched.json> <out.json> [shorter_size]`):
+bf16 transformer + bf16 Gemma, full (non-tiled) VAE decode, 1440 generation size, plus a 16-bit PNG sequence output.
+Download `ltx-2.5-22b-distilled-transformer-bf16.safetensors` and `gemma4-12b-with-proj-ltx-2.5-bf16.safetensors`
+from the Lightricks/LTX-2.5 Hugging Face repo if you don't have them. If you run out of memory on long clips, lower the size to 1088.
