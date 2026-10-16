@@ -2,7 +2,7 @@
   "id": "3e672092-e1cd-4ddc-982c-b65fea6dd437",
   "revision": 0,
   "last_node_id": 5022,
-  "last_link_id": 80,
+  "last_link_id": 81,
   "nodes": [
     {
       "id": 4852,
@@ -172,10 +172,10 @@
         "Node name for S&R": "CFGGuider"
       },
       "widgets_values": [
-        1
+        4
       ],
       "widgets_values_named": {
-        "cfg": 1
+        "cfg": 4
       }
     },
     {
@@ -208,27 +208,34 @@
         "Node name for S&R": "KSamplerSelect"
       },
       "widgets_values": [
-        "euler_ancestral"
+        "euler"
       ],
       "widgets_values_named": {
-        "sampler_name": "euler_ancestral"
+        "sampler_name": "euler"
       }
     },
     {
       "id": "5516_4984",
-      "type": "ManualSigmas",
+      "type": "LTXVScheduler",
       "pos": [
         1.7446975077479514,
         704.3507917419938
       ],
       "size": [
         270,
-        58
+        150
       ],
       "flags": {},
       "order": 3,
       "mode": 0,
-      "inputs": [],
+      "inputs": [
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "shape": 7,
+          "link": 80
+        }
+      ],
       "outputs": [
         {
           "name": "SIGMAS",
@@ -241,13 +248,21 @@
       "properties": {
         "cnr_id": "comfy-core",
         "ver": "0.40.0",
-        "Node name for S&R": "ManualSigmas"
+        "Node name for S&R": "LTXVScheduler"
       },
       "widgets_values": [
-        "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
+        40,
+        2.05,
+        0.95,
+        true,
+        0.1
       ],
       "widgets_values_named": {
-        "sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
+        "steps": 40,
+        "max_shift": 2.05,
+        "base_shift": 0.95,
+        "stretch": true,
+        "terminal": 0.1
       }
     },
     {
@@ -447,10 +462,10 @@
         "Node name for S&R": "CLIPTextEncode"
       },
       "widgets_values": [
-        ""
+        "worst quality, inconsistent motion, blurry, jittery, distorted, watermark, flicker"
       ],
       "widgets_values_named": {
-        "text": ""
+        "text": "worst quality, inconsistent motion, blurry, jittery, distorted, watermark, flicker"
       }
     },
     {
@@ -644,7 +659,8 @@
           "name": "LATENT",
           "type": "LATENT",
           "links": [
-            27
+            27,
+            80
           ]
         }
       ],
@@ -1330,11 +1346,11 @@
         "Node name for S&R": "UNETLoader"
       },
       "widgets_values": [
-        "ltx-2.5-22b-distilled-transformer-bf16.safetensors",
+        "ltx-2.5-22b-dev-transformer-bf16.safetensors",
         "default"
       ],
       "widgets_values_named": {
-        "unet_name": "ltx-2.5-22b-distilled-transformer-bf16.safetensors",
+        "unet_name": "ltx-2.5-22b-dev-transformer-bf16.safetensors",
         "weight_dtype": "default"
       }
     },
@@ -1942,7 +1958,7 @@
           "type": "IMAGE",
           "links": [
             66,
-            80
+            81
           ]
         }
       ],
@@ -2357,7 +2373,7 @@
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 80
+          "link": 81
         }
       ],
       "outputs": [
@@ -2949,6 +2965,14 @@
     ],
     [
       80,
+      "9002_3059",
+      0,
+      "5516_4984",
+      0,
+      "LATENT"
+    ],
+    [
+      81,
       5011,
       0,
       5022,
