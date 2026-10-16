@@ -2069,10 +2069,7 @@
         {
           "name": "fps",
           "type": "FLOAT",
-          "link": 70,
-          "widget": {
-            "name": "fps"
-          }
+          "link": 70
         }
       ],
       "outputs": [
@@ -2088,9 +2085,7 @@
       "properties": {
         "Node name for S&R": "KrishLTXAudioPrep"
       },
-      "widgets_values": [
-        24.0
-      ],
+      "widgets_values": [],
       "color": "#2a4a3a",
       "bgcolor": "#1f3a2c"
     },
@@ -2239,10 +2234,7 @@
         {
           "name": "fps",
           "type": "FLOAT",
-          "link": 79,
-          "widget": {
-            "name": "fps"
-          }
+          "link": 79
         }
       ],
       "outputs": [
@@ -2258,9 +2250,7 @@
       "properties": {
         "Node name for S&R": "KrishLTXAudioRestore"
       },
-      "widgets_values": [
-        24.0
-      ],
+      "widgets_values": [],
       "color": "#2a4a3a",
       "bgcolor": "#1f3a2c"
     },

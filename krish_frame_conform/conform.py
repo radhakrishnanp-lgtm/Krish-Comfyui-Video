@@ -160,9 +160,14 @@ def parity(a, b, atol=None):
     return problems
 
 
+def _waveform(audio):
+    wav = audio["waveform"]
+    return wav.unsqueeze(0) if wav.dim() == 2 else wav  # [C, T] -> [1, C, T]
+
+
 def restore_audio(audio, info, fps):
     """Trim/zero-pad an AUDIO dict to exactly orig_frames / fps seconds."""
-    wav, sr = audio["waveform"], int(audio["sample_rate"])
+    wav, sr = _waveform(audio), int(audio["sample_rate"])
     target = int(round(info.orig_frames / float(fps) * sr))
     t = wav.shape[-1]
     if t > target:
@@ -174,7 +179,7 @@ def restore_audio(audio, info, fps):
 
 def prepare_audio(audio, info, fps):
     """Zero-pad (or trim) an AUDIO dict to padded_frames / fps seconds, matching the padded video."""
-    wav, sr = audio["waveform"], int(audio["sample_rate"])
+    wav, sr = _waveform(audio), int(audio["sample_rate"])
     target = int(round(info.padded_frames / float(fps) * sr))
     t = wav.shape[-1]
     if t > target:

@@ -2599,10 +2599,7 @@
         {
           "name": "fps",
           "type": "FLOAT",
-          "link": 13957,
-          "widget": {
-            "name": "fps"
-          }
+          "link": 13957
         }
       ],
       "outputs": [
@@ -2619,9 +2616,7 @@
       "properties": {
         "Node name for S&R": "KrishLTXAudioRestore"
       },
-      "widgets_values": [
-        24.0
-      ],
+      "widgets_values": [],
       "color": "#2a4a3a",
       "bgcolor": "#1f3a2c"
     },

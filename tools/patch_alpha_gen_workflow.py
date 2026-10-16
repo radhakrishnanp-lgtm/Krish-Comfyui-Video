@@ -100,8 +100,8 @@ parity = new_node("KrishFrameParityCheck", [-1000, 3420], [300, 130],
                   [("result", "IMAGE"), ("report", "STRING")], ["error"], "Krish Frame Parity Check")
 arest = new_node("KrishLTXAudioRestore", [-1000, 2900], [300, 110],
                  [inp("audio", "AUDIO"), inp("conform_info", "KRISH_CONFORM"),
-                  inp("fps", "FLOAT", widget=True)],
-                 [("audio", "AUDIO")], [24.0], "Krish LTX Audio Restore")
+                  inp("fps", "FLOAT")],
+                 [("audio", "AUDIO")], [], "Krish LTX Audio Restore")
 rep1 = new_node("PreviewAny", [-1000, 3580], [300, 90], [inp("source", "*")], [], [], "Restore report", None)
 rep2 = new_node("PreviewAny", [-1000, 3690], [300, 90], [inp("source", "*")], [], [], "Parity report", None)
 note = new_node("Note", [-4300, 3300], [420, 230], [], [],

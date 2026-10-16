@@ -94,7 +94,7 @@ class KrishLTXAudioPrep:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"audio": ("AUDIO",), "conform_info": ("KRISH_CONFORM",),
-                             "fps": ("FLOAT", {"default": 24.0, "min": 0.01, "max": 1000.0})}}
+                             "fps": ("FLOAT", {"default": 24.0, "min": 0.01, "max": 1000.0, "forceInput": True})}}
 
     RETURN_TYPES = ("AUDIO",)
     RETURN_NAMES = ("audio",)
@@ -111,7 +111,7 @@ class KrishLTXAudioRestore:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"audio": ("AUDIO",), "conform_info": ("KRISH_CONFORM",),
-                             "fps": ("FLOAT", {"default": 24.0, "min": 0.01, "max": 1000.0})}}
+                             "fps": ("FLOAT", {"default": 24.0, "min": 0.01, "max": 1000.0, "forceInput": True})}}
 
     RETURN_TYPES = ("AUDIO",)
     RETURN_NAMES = ("audio",)

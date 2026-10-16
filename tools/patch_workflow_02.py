@@ -75,7 +75,7 @@ prep = new_node("KrishLTXFramePrep", [700, 130], [320, 190], [inp("images", "IMA
                 [8, 32, "repeat_last", "reflect", "center"], "Krish LTX Frame Prep")
 aprep = new_node("KrishLTXAudioPrep", [1100, 1005], [270, 100],
                  [inp("audio", "AUDIO"), inp("conform_info", "KRISH_CONFORM"),
-                  inp("fps", "FLOAT", widget=True)], [("audio", "AUDIO")], [24.0], "Krish LTX Audio Prep")
+                  inp("fps", "FLOAT")], [("audio", "AUDIO")], [], "Krish LTX Audio Prep")
 restore = new_node("KrishLTXFrameRestore", [3756, 330], [320, 190],
                    [inp("generated", "IMAGE"), inp("conform_info", "KRISH_CONFORM"),
                     inp("source_images", "IMAGE", optional=True), inp("mask", "MASK", optional=True)],
@@ -86,7 +86,7 @@ parity = new_node("KrishFrameParityCheck", [3756, 560], [300, 130],
                   [("result", "IMAGE"), ("report", "STRING")], ["error"], "Krish Frame Parity Check")
 arest = new_node("KrishLTXAudioRestore", [3750, 420 + 330], [270, 100],
                  [inp("audio", "AUDIO"), inp("conform_info", "KRISH_CONFORM"),
-                  inp("fps", "FLOAT", widget=True)], [("audio", "AUDIO")], [24.0], "Krish LTX Audio Restore")
+                  inp("fps", "FLOAT")], [("audio", "AUDIO")], [], "Krish LTX Audio Restore")
 arest["pos"] = [3453, 420]
 rep1 = new_node("PreviewAny", [4090, 330], [300, 90], [inp("source", "*")], [], [], "Restore report", None)
 rep2 = new_node("PreviewAny", [4090, 440], [300, 90], [inp("source", "*")], [], [], "Parity report", None)

@@ -73,3 +73,11 @@ def test_prepare_audio_matches_padded_video_then_restores():
     assert pa["waveform"].shape[-1] == round(info.padded_frames / 25.0 * 48000)
     back = conform.restore_audio(pa, info, 25.0)
     assert torch.equal(back["waveform"], src["waveform"])
+
+
+def test_audio_accepts_2d_waveform():
+    x = torch.rand(20, 32, 32, 3)
+    padded, info = conform.prepare(x)
+    a = {"waveform": torch.rand(2, 1000), "sample_rate": 48000}
+    assert conform.prepare_audio(a, info, 24.0)["waveform"].dim() == 3
+    assert conform.restore_audio(a, info, 24.0)["waveform"].dim() == 3
