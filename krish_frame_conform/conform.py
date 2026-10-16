@@ -187,3 +187,103 @@ def prepare_audio(audio, info, fps):
     elif t < target:
         wav = F.pad(wav, (0, target - t))
     return {"waveform": wav, "sample_rate": sr}
+
+
+# ---------------------------------------------------------------- matte / temporal checks
+def _small_gray(x, size=64, chunk=16):
+    """[N,H,W,C] -> [N,size,size] float gray, chunked so 4K batches stay cheap."""
+    outs = []
+    for i in range(0, x.shape[0], chunk):
+        c = x[i:i + chunk].float()
+        g = c[..., :3].mean(-1) if c.shape[-1] >= 3 else c[..., 0]
+        outs.append(F.adaptive_avg_pool2d(g.unsqueeze(1), (size, size)).squeeze(1))
+    return torch.cat(outs)
+
+
+def _lagged_corr(a, b, lag):
+    """Pearson corr of a[t] vs b[t+lag] (None if undefined)."""
+    if lag >= 0:
+        x, y = a[: len(a) - lag], b[lag:]
+    else:
+        x, y = a[-lag:], b[: len(b) + lag]
+    if len(x) < 4:
+        return None
+    x, y = x - x.mean(), y - y.mean()
+    den = float(x.norm() * y.norm())
+    return float((x * y).sum()) / den if den > 1e-12 else None
+
+
+def temporal_check(source, result, max_lag=4, lag_margin=0.1, spike_thr=0.15):
+    """Frame-to-frame sanity checks of a generated matte against its source.
+
+    Returns (problems, warnings, info). `problems` are hard failures (wrong count, NaN/Inf, out of range,
+    frames shifted in time, duplicated frames, isolated empty frames); `warnings` are soft (flicker spikes,
+    static clips). Frame indices are 0-based.
+    """
+    problems, warnings, info = [], [], {}
+    n = result.shape[0]
+    if source.shape[0] != n:
+        return [f"frame count {source.shape[0]} (source) vs {n} (result)"], warnings, info
+
+    # NaN / Inf / range
+    if not bool(torch.isfinite(result).all()):
+        bad = [t for t in range(n) if not bool(torch.isfinite(result[t]).all())]
+        problems.append(f"non-finite values (NaN/Inf) in frames {bad[:20]}")
+    lo, hi = float(result.amin()), float(result.amax())
+    info["range"] = (lo, hi)
+    if lo < -0.01 or hi > 1.01:
+        problems.append(f"values out of 0..1 range: min {lo:.3f} max {hi:.3f}")
+    if n < 2:
+        return problems, warnings, info
+
+    # per-frame coverage (mean) and emptiness (max)
+    means = torch.stack([result[t].float().mean() for t in range(n)])
+    maxs = torch.stack([result[t].float().amax() for t in range(n)])
+    info["mean_coverage"] = [round(float(m), 4) for m in means[: min(n, 5)]]
+
+    # exact duplicate frames in the result that are NOT duplicates in the source
+    dups = [t for t in range(1, n)
+            if torch.equal(result[t], result[t - 1]) and not torch.equal(source[t], source[t - 1])]
+    if dups:
+        problems.append(f"duplicated result frames (held/repeated) at {dups[:20]}")
+
+    # isolated dropouts: empty frame between frames that have matte content
+    drops = []
+    for t in range(n):
+        if float(maxs[t]) < 1e-3:
+            nb = [float(means[u]) for u in (t - 1, t + 1) if 0 <= u < n]
+            if nb and all(v > 0.02 for v in nb):
+                drops.append(t)
+    if drops:
+        problems.append(f"isolated empty (dropout) frames at {drops[:20]}")
+
+    # flicker spikes (soft)
+    spikes = []
+    for t in range(1, n - 1):
+        med = float(means[t - 1] + means[t + 1]) / 2
+        if abs(float(means[t]) - med) > spike_thr and abs(float(means[t - 1] - means[t + 1])) < spike_thr / 2:
+            spikes.append(t)
+    if spikes:
+        warnings.append(f"coverage spikes (possible flicker) at {spikes[:20]}")
+
+    # temporal alignment: motion energy of result must line up with motion energy of source
+    gs, gr = _small_gray(source), _small_gray(result)
+    ms = (gs[1:] - gs[:-1]).abs().mean(dim=(1, 2))
+    mr = (gr[1:] - gr[:-1]).abs().mean(dim=(1, 2))
+    if n < 8 or float(ms.std()) < 1e-5:
+        warnings.append("alignment check skipped (clip too short or source is static)")
+    else:
+        corrs = {l: _lagged_corr(ms, mr, l) for l in range(-max_lag, max_lag + 1)}
+        valid = {l: c for l, c in corrs.items() if c is not None}
+        info["lag_corr"] = {l: round(c, 3) for l, c in valid.items()}
+        c0 = valid.get(0)
+        if c0 is None:
+            warnings.append("result has no motion; alignment could not be verified")
+        else:
+            best_lag = max(valid, key=valid.get)
+            if best_lag != 0 and valid[best_lag] - c0 > lag_margin:
+                problems.append(f"frames shifted in time: result best matches source at lag {best_lag:+d} "
+                                f"(corr {valid[best_lag]:.2f} vs {c0:.2f} at lag 0)")
+            info["best_lag"] = best_lag
+            info["corr_at_0"] = round(c0, 3)
+    return problems, warnings, info

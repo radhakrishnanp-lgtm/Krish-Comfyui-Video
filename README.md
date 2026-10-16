@@ -47,3 +47,8 @@ Frame Prep + Audio Prep before the latent is sized, Frame Restore + Parity Check
 `ltx-2.5-22b-dev-transformer-bf16` + bf16 Gemma, LTXVScheduler 40 steps, CFG 4, euler, full (non-tiled) VAE decode,
 1440 generation size, and a 16-bit PNG sequence output. Expect it to be much slower than the distilled 8-step setup.
 The step count, CFG and sampler are starting values, not tuned for 2.5. If you run out of memory, lower the size to 1088.
+
+## LTX 2.5 Matte Gen - no audio (VFX)
+`workflows/LTX_2.5_Matte_Gen_NoAudio_Krish.json` (`python3 tools/patch_matte_no_audio.py <original.json> <out.json>`):
+no audio decode/save/export; **Krish Matte Frame-to-Frame Check** (count, NaN/Inf, range, time shift, duplicated frames,
+isolated dropouts, flicker spikes) plus a FINAL parity check of the deliverable against the original loaded frames.

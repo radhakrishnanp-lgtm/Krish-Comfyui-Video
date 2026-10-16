@@ -81,3 +81,49 @@ def test_audio_accepts_2d_waveform():
     a = {"waveform": torch.rand(2, 1000), "sample_rate": 48000}
     assert conform.prepare_audio(a, info, 24.0)["waveform"].dim() == 3
     assert conform.restore_audio(a, info, 24.0)["waveform"].dim() == 3
+
+
+def _moving_square(n=40, size=48, seed=0):
+    g = torch.Generator().manual_seed(seed)
+    steps = torch.rand(n, generator=g) * 3 + (torch.arange(n) % 5 == 0) * 4  # varied speed -> structured motion
+    pos = steps.cumsum(0) % (size - 10)
+    x = torch.zeros(n, size, size, 3)
+    for t in range(n):
+        p = int(pos[t])
+        x[t, 8:18, p:p + 10, :] = 1.0
+    return x
+
+
+def test_temporal_check_passes_when_aligned():
+    src = _moving_square()
+    problems, warnings, info = conform.temporal_check(src, src.clone())
+    assert problems == [] and info["best_lag"] == 0
+
+
+def test_temporal_check_detects_time_shift():
+    src = _moving_square()
+    shifted = torch.cat([src[:1], src[:1], src[:-2]])  # result lags the source by 1 frame
+    problems, _, _ = conform.temporal_check(src, shifted, max_lag=3)
+    assert any("shifted" in p or "duplicated" in p for p in problems)
+    shifted2 = torch.roll(src, 2, dims=0)
+    problems, _, info = conform.temporal_check(src, shifted2, max_lag=4)
+    assert any("shifted" in p for p in problems)
+
+
+def test_temporal_check_detects_duplicates_dropout_nan_and_count():
+    src = _moving_square()
+    dup = src.clone()
+    dup[10] = dup[9]
+    assert any("duplicated" in p for p in conform.temporal_check(src, dup)[0])
+    drop = src.clone()
+    drop[20] = 0
+    assert any("dropout" in p for p in conform.temporal_check(src, drop)[0])
+    nan = src.clone()
+    nan[5, 3, 3, 0] = float("nan")
+    assert any("non-finite" in p for p in conform.temporal_check(src, nan)[0])
+    assert any("frame count" in p for p in conform.temporal_check(src, src[:-1])[0])
+
+
+def test_temporal_check_flags_out_of_range():
+    src = _moving_square()
+    assert any("range" in p for p in conform.temporal_check(src, src * 2)[0])

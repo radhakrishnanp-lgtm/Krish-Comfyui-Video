@@ -88,6 +88,38 @@ class KrishFrameParityCheck:
         return (result, msg)
 
 
+class KrishMatteFrameCheck:
+    """Frame-to-frame QC of a generated matte vs its source: count, NaN/range, time shift, duplicates, dropouts."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "source": ("IMAGE",), "result": ("IMAGE",),
+            "on_fail": (["error", "warn"],),
+            "max_lag": ("INT", {"default": 4, "min": 0, "max": 24, "tooltip": "Frames of shift to test for."}),
+        }}
+
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING")
+    RETURN_NAMES = ("result", "report", "flagged_frames")
+    FUNCTION = "run"
+    CATEGORY = CATEGORY
+
+    def run(self, source, result, on_fail, max_lag):
+        problems, warnings, info = conform.temporal_check(source, result, max_lag=max_lag)
+        lines = [f"frames: {result.shape[0]}  size: {result.shape[2]}x{result.shape[1]}"]
+        if "best_lag" in info:
+            lines.append(f"alignment: best lag {info['best_lag']:+d}, corr@0 {info['corr_at_0']}")
+        lines += [f"FAIL: {p}" for p in problems] + [f"WARN: {w}" for w in warnings]
+        if not problems:
+            lines.insert(1, "OK: all frame-to-frame checks passed")
+        report = "\n".join(lines)
+        flagged = "; ".join(problems + warnings)
+        print("[KrishLTX] matte check\n" + report)
+        if problems and on_fail == "error":
+            raise ValueError("MATTE FRAME CHECK FAILED\n" + report)
+        return (result, report, flagged)
+
+
 class KrishLTXAudioPrep:
     """Zero-pad source audio to the padded video length so audio and video latents line up."""
 
@@ -128,6 +160,7 @@ NODE_CLASS_MAPPINGS = {
     "KrishFrameParityCheck": KrishFrameParityCheck,
     "KrishLTXAudioRestore": KrishLTXAudioRestore,
     "KrishLTXAudioPrep": KrishLTXAudioPrep,
+    "KrishMatteFrameCheck": KrishMatteFrameCheck,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "KrishLTXFramePrep": "Krish LTX Frame Prep (pad to grid)",
@@ -135,4 +168,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "KrishFrameParityCheck": "Krish Frame Parity Check",
     "KrishLTXAudioRestore": "Krish LTX Audio Restore (exact duration)",
     "KrishLTXAudioPrep": "Krish LTX Audio Prep (pad to video)",
+    "KrishMatteFrameCheck": "Krish Matte Frame-to-Frame Check",
 }
