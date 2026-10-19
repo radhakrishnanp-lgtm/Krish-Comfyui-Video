@@ -63,3 +63,10 @@ ComfyUI keeps the old node code until it restarts. Pull the latest into `ComfyUI
 (`git pull origin claude/relaxed-bardeen-xyfs5r`, or re-download the branch zip and replace the folder), restart ComfyUI,
 then load the workflow file again. In the Matte Gen workflow the matte check is a report-only side branch: it can no longer
 stop the frames. Only the Parity checks (frame count / size vs the original) can stop a run.
+
+## DepthCrafter workflow (exact frames + fps)
+`workflows/DepthCrafter_Krish_ExactFrames.json` (`python3 tools/patch_depthcrafter.py <original.json> <out.json>`) for
+[ComfyUI-DepthCrafter-Nodes](https://github.com/akatz-ai/ComfyUI-DepthCrafter-Nodes). DepthCrafter already returns one depth
+map per input frame and the workflow scales back to the loaded size, so no padding is used. A FINAL Krish Parity Check compares
+the finished frames with the original loaded frames (count, width, height) and stops with an error if they differ. Output fps is the
+source fps. None of the LTX nodes or workflows are touched.
