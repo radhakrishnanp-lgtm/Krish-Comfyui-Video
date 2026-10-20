@@ -70,3 +70,7 @@ stop the frames. Only the Parity checks (frame count / size vs the original) can
 map per input frame and the workflow scales back to the loaded size, so no padding is used. A FINAL Krish Parity Check compares
 the finished frames with the original loaded frames (count, width, height) and stops with an error if they differ. Output fps is the
 source fps. None of the LTX nodes or workflows are touched.
+
+## Soft frames at the start of an LTX matte (tiled VAE decode)
+`tools/fix_tiled_decode.py` swaps `VAEDecodeTiled` for a full `VAEDecode`. With `temporal_size 64` the LTX VAE decodes 8 latent
+frames = 57 pixel frames (0..56) per tile and blends neighbouring tiles, which softens fine detail around the tile boundary.
