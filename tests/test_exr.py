@@ -530,3 +530,49 @@ def test_encoding_hint_reads_the_tags():
     assert "scene-linear" in exr_io.suggest_encoding({"colorInteropID": "lin_ap1_scene"})
     assert "display-referred" in exr_io.suggest_encoding({"oiio:ColorSpace": "srgb_rec709_display"})
     assert "no colour tags" in exr_io.suggest_encoding({})
+
+
+# ------------------------------------------------------------------ keep the original outside a model edit
+@pytest.mark.parametrize("t", ["sRGB", "Rec.709", "gamma 2.2"])
+def test_soft_knee_round_trip_recovers_hdr_values(t):
+    x = torch.cat([torch.linspace(0, 0.8, 50), torch.logspace(-0.1, 1.5, 200)])          # 0 .. ~31
+    enc = exr_color.linear_to_display(x, t, 0.0, "soft_knee")
+    assert float(enc.min()) >= 0 and float(enc.max()) < 1.0                              # valid model input, nothing clipped
+    back = exr_color.display_to_linear(enc, t, 0.0, "soft_knee")
+    assert bool(((back - x).abs() <= 2e-3 * (1 + x)).all()), float((back - x).abs().max())
+
+
+def test_merge_restores_original_bit_exactly_outside_the_edit():
+    g = torch.Generator().manual_seed(4)
+    orig = torch.rand(1, 40, 60, 3, generator=g) * 12 - 0.01                              # HDR with a few negatives
+    enc = exr_color.linear_to_display(orig, "sRGB", 0.0, "soft_knee")
+    edited = enc.clone()
+    edited[:, 10:20, 15:30] = torch.rand(1, 10, 15, 3, generator=g) * 0.9               # the model "paints" a patch
+    out, changed = exr_color.merge_outside_edit(orig, enc, edited, "sRGB", 0.0, "soft_knee")
+    inside = torch.zeros(1, 40, 60, dtype=torch.bool)
+    inside[:, 10:20, 15:30] = True
+    assert torch.equal(out[~inside], orig[~inside])                                       # bit-identical, negatives included
+    assert bool((changed.bool() == inside).all())
+    assert torch.allclose(out[inside], exr_color.display_to_linear(edited, "sRGB", 0.0, "soft_knee")[inside])
+    with pytest.raises(ValueError, match="size mismatch"):
+        exr_color.merge_outside_edit(orig, enc, edited[:, :30], "sRGB")
+
+
+def test_merge_node_and_acescct_variant(tmp_path):
+    orig = torch.rand(2, 16, 24, 3) * 40
+    node = NODES["KrishEXRKeepOriginalOutsideEdit"]()
+    enc = exr_color.linear_to_display(orig, "ACEScct (log, invertible)", 0.0, "clip")
+    edited = enc.clone()
+    edited[:, 4:8, 4:8] = 0.5
+    out, changed, report = node.run(orig, enc, edited, "ACEScct (log, invertible)", 0.0, "clip", 1e-6)
+    assert "of pixels were changed" in report and 0 < float(changed.mean()) < 0.1
+    outside = ~changed.bool()
+    assert torch.equal(out[outside], orig[outside])
+
+
+def test_from_display_node_can_undo_the_knee():
+    x = torch.tensor([[[[0.1, 2.0, 9.0]]]])
+    enc = NODES["KrishEXRToDisplay"]().run(x, "sRGB", 0.0, "soft_knee")[0]
+    back = NODES["KrishEXRFromDisplay"]().run(enc, "sRGB", 0.0, "soft_knee")[0]
+    assert torch.allclose(back, x, rtol=2e-3)
+    assert float(NODES["KrishEXRFromDisplay"]().run(enc, "sRGB", 0.0)[0].max()) < 2.0   # default does not undo it

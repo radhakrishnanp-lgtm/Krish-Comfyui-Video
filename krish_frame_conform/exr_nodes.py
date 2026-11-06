@@ -85,7 +85,7 @@ class KrishEXRLoad:
                 "frames": frames, "width": W, "height": H, "fps": fps}
         h0 = frames[0]["headers"][part_index]
         comp = str(h0.get("compression")).split(".")[-1]
-        names = {n for n in layer_map.values() if isinstance(n, str)}
+        names = {v for k, v in layer_map.items() if k != "prefix" and isinstance(v, str)}
         lines = [f"{len(recs)} frame(s) {W}x{H}  first: {recs[0]['path']}",
                  f"layer: '{layer or 'main'}' channels: {sorted(names)}  alpha: {'yes' if have_a else 'no'}",
                  f"compression: {comp}  parts: {len(frames[0]['headers'])}  fps: {fps if fps else f'not in file (using {fallback_fps})'}",
@@ -215,7 +215,7 @@ class KrishEXRToDisplay:
 
 
 class KrishEXRFromDisplay:
-    """Display-referred -> scene-linear, unclamped. Inverse of the display transform (cannot undo clipping or soft_knee)."""
+    """Display-referred -> scene-linear, unclamped. Inverse of Linear -> Display (clip cannot be undone)."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -223,6 +223,7 @@ class KrishEXRFromDisplay:
             "images": ("IMAGE",),
             "transform": (exr_color.TRANSFORMS, {"default": "sRGB"}),
             "exposure_stops": ("FLOAT", {"default": 0.0, "min": -16.0, "max": 16.0, "step": 0.1}),
+            "highlights": (exr_color.HIGHLIGHTS, {"tooltip": "soft_knee: also undo the soft knee applied by Linear -> Display."}),
         }}
 
     RETURN_TYPES = ("IMAGE",)
@@ -230,8 +231,38 @@ class KrishEXRFromDisplay:
     FUNCTION = "run"
     CATEGORY = CATEGORY
 
-    def run(self, images, transform, exposure_stops):
-        return (exr_color.display_to_linear(images, transform, exposure_stops),)
+    def run(self, images, transform, exposure_stops, highlights="clip"):
+        return (exr_color.display_to_linear(images, transform, exposure_stops, highlights),)
+
+
+class KrishEXRKeepOriginalOutsideEdit:
+    """Decode a model's edit back to scene-linear, restoring the ORIGINAL linear pixels everywhere the model left alone."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "original_linear": ("IMAGE", {"tooltip": "The EXR plate as loaded (scene-linear)."}),
+            "original_encoded": ("IMAGE", {"tooltip": "The exact image that went into the model workflow (output of Linear -> Display)."}),
+            "edited_encoded": ("IMAGE", {"tooltip": "The model workflow result at the same size (e.g. after the inpaint stitch)."}),
+            "transform": (exr_color.TRANSFORMS, {"default": "sRGB", "tooltip": "Must match Linear -> Display."}),
+            "exposure_stops": ("FLOAT", {"default": 0.0, "min": -16.0, "max": 16.0, "step": 0.1, "tooltip": "Must match Linear -> Display."}),
+            "highlights": (exr_color.HIGHLIGHTS, {"tooltip": "Must match Linear -> Display. soft_knee undoes the knee exactly."}),
+            "tolerance": ("FLOAT", {"default": 1e-6, "min": 0.0, "max": 0.01, "step": 1e-6, "tooltip": "Pixels that differ from the input by less than this count as unchanged."}),
+        }}
+
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING")
+    RETURN_NAMES = ("images", "changed_mask", "report")
+    FUNCTION = "run"
+    CATEGORY = CATEGORY
+
+    def run(self, original_linear, original_encoded, edited_encoded, transform, exposure_stops, highlights, tolerance):
+        out, changed = exr_color.merge_outside_edit(original_linear, original_encoded, edited_encoded, transform,
+                                                    exposure_stops, highlights, tolerance)
+        pct = float(changed.mean()) * 100
+        report = (f"{pct:.2f}% of pixels were changed by the model and decoded; the other {100 - pct:.2f}% are the original "
+                  f"linear pixels, untouched. Output range {float(out.min()):.4f} .. {float(out.max()):.4f}")
+        print("[KrishEXR] " + report)
+        return (out, changed, report)
 
 
 NODE_CLASS_MAPPINGS = {
@@ -239,10 +270,12 @@ NODE_CLASS_MAPPINGS = {
     "KrishEXRSave": KrishEXRSave,
     "KrishEXRToDisplay": KrishEXRToDisplay,
     "KrishEXRFromDisplay": KrishEXRFromDisplay,
+    "KrishEXRKeepOriginalOutsideEdit": KrishEXRKeepOriginalOutsideEdit,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "KrishEXRLoad": "Krish EXR Load (float, sequence, metadata)",
     "KrishEXRSave": "Krish EXR Save (same details as source)",
     "KrishEXRToDisplay": "Krish EXR Linear -> Display (for models)",
     "KrishEXRFromDisplay": "Krish EXR Display -> Linear",
+    "KrishEXRKeepOriginalOutsideEdit": "Krish EXR Keep Original Outside Edit (decode + merge)",
 }

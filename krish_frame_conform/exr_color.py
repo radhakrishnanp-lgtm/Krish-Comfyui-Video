@@ -90,7 +90,38 @@ def linear_to_display(images, transform="sRGB", exposure_stops=0.0, highlights="
     return y.clamp(0, 1) if highlights == "clip" else y.clamp_min(0)
 
 
-def display_to_linear(images, transform="sRGB", exposure_stops=0.0):
-    """Display-referred -> scene-linear. No clamping; the inverse of linear_to_display (except clipping/knee)."""
-    y = images.float()
-    return _curves(transform)[1](y) * (2.0 ** -float(exposure_stops))
+def soft_knee_inverse(z, knee=0.8):
+    """Exact inverse of soft_knee. Values at or above 1.0 decode to a large finite maximum instead of infinity."""
+    k = float(knee)
+    c = 1 - k
+    over = (z - k).clamp(0, c * (1 - 1e-5))
+    return torch.where(z <= k, z, k + c * over / (c - over))
+
+
+def display_to_linear(images, transform="sRGB", exposure_stops=0.0, highlights="clip"):
+    """Display-referred -> scene-linear. No clamping. highlights='soft_knee' also undoes the soft knee that
+    linear_to_display applied, so linear_to_display(..., 'soft_knee') and this are inverses of each other."""
+    lin = _curves(transform)[1](images.float())
+    if highlights == "soft_knee" and not transform.startswith("ACEScct"):
+        lin = soft_knee_inverse(lin)
+    return lin * (2.0 ** -float(exposure_stops))
+
+
+def merge_outside_edit(original_linear, original_encoded, edited_encoded, transform="sRGB", exposure_stops=0.0,
+                       highlights="clip", tolerance=1e-6):
+    """Decode only what a model changed; everything it left alone comes back from the ORIGINAL linear pixels.
+
+    original_encoded is the exact image that was given to the model workflow. Pixels where the edited result equals it
+    (within `tolerance`) are restored bit-exactly from original_linear instead of passing through the encode/decode curve.
+    Returns (linear image, changed mask [N,H,W]).
+    """
+    dev = edited_encoded.device
+    ol, oe = original_linear.to(dev).float(), original_encoded.to(dev).float()
+    ee = edited_encoded.float()[..., :3]
+    if not (ol.shape[:3] == oe.shape[:3] == ee.shape[:3]):
+        raise ValueError(f"size mismatch: original {tuple(ol.shape[1:3])}, encoded {tuple(oe.shape[1:3])}, "
+                         f"edited {tuple(ee.shape[1:3])}; all three must be the same size and frame count")
+    changed = ((ee - oe[..., :3]).abs() > float(tolerance)).any(dim=-1, keepdim=True)
+    decoded = display_to_linear(ee, transform, exposure_stops, highlights)
+    out = torch.where(changed, decoded, ol[..., :3])
+    return out, changed.squeeze(-1).float()

@@ -113,3 +113,10 @@ scene-linear -0.0069 .. 222.9, and `Display -> Linear` with the same setting is 
 instead of clipping at 1.0. It is a curve only (no primaries conversion). Keep bit depth high end to end: quantisation is
 magnified by the inverse curve (8-bit ACEScct is about 4.9% per step in linear), so save EXR (or 16-bit+), never 8-bit video, in
 the middle of the chain. The loader's `info` prints an `encoding hint` read from the file's colour tags.
+
+## Qwen 2.1 edit with EXR in / EXR out
+`workflows/Qwen_2.1_Edit_EXR.json` (`python3 tools/make_qwen_exr_workflow.py <qwen_edit.json> <out.json> [exr_name]`) is the Qwen
+inpaint workflow with the PNG plate replaced by `Krish EXR Load` -> `Linear -> Display` (sRGB + soft knee: nothing clipped) and the
+output replaced by `Krish EXR Keep Original Outside Edit` -> `Krish EXR Save`. Only the pixels Qwen changed are decoded; every other
+pixel is the original linear pixel, bit for bit (checked on a real 4096x2304 half-float PIZ frame: same header, timecode, fps,
+type, compression and frame number). The mask PNG must be the same size as the EXR. The original workflow file is not modified.
