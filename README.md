@@ -74,3 +74,35 @@ source fps. None of the LTX nodes or workflows are touched.
 ## Soft frames at the start of an LTX matte (tiled VAE decode)
 `tools/fix_tiled_decode.py` swaps `VAEDecodeTiled` for a full `VAEDecode`. With `temporal_size 64` the LTX VAE decodes 8 latent
 frames = 57 pixel frames (0..56) per tile and blends neighbouring tiles, which softens fine detail around the tile boundary.
+
+## EXR in -> EXR out (same colour tags, metadata, channels, frame numbers)
+Install the backend into the Python that runs ComfyUI: `python -m pip install OpenEXR` (also listed in `requirements.txt`).
+If it is missing, only the EXR nodes report that; the LTX nodes are unaffected.
+
+| Node | What it does |
+|---|---|
+| **Krish EXR Load** | File, folder or pattern (`plate.%04d.exr`, `plate.####.exr`) -> unclamped float32 `images`, true `alpha`, `exr_meta`, `info`, frame count, width, height, **fps from the file**. Pick a `layer` / `part_index` for AOVs and multi-part files. |
+| **Krish EXR Save** | For every frame it re-opens the **original EXR** and replaces only the channels you choose, so everything else is carried over as it was. Output keeps the **source frame numbers**. |
+| **Krish EXR Linear -> Display** | Scene-linear -> display 0..1 for models (sRGB / Rec.709 / gamma, exposure, `clip` or `soft_knee`). |
+| **Krish EXR Display -> Linear** | Inverse curve, never clamps. |
+
+**Save modes:** `replace_rgb` (images become R,G,B(,A)) | `matte_to_alpha_keep_rgb` (source RGB untouched, matte in A) |
+`matte_only_alpha` (file holds only the matte) | `matte_as_gray_rgb`. `keep_other_channels` keeps AOVs, other layers and other parts.
+
+**Preserved verbatim:** every header attribute (chromaticities, `colorInteropID`, `oiio:ColorSpace`, `framesPerSecond`, timecode,
+matrices, vectors, arrays, custom/vendor keys), data window vs display window (overscan/crop), pixel aspect, line order, tiling,
+part names, per-channel pixel type (half stays half, float stays float, uint stays uint), and compression. With `verify: strict`
+every written header is re-read and compared with the source; any difference stops the run and names the attribute.
+Source files are never overwritten, and files are written atomically.
+
+**Colour space:** EXR has no mandatory colour-space field. The nodes copy the tags unchanged and never convert primaries; the
+`info` output names the space (e.g. `lin_ap0_scene`). The Linear <-> Display nodes only change the transfer curve for the model.
+
+**Matte workflow wiring (LTX):** `Krish EXR Load` -> `Krish EXR Linear -> Display` (clip) -> Resize -> `Krish LTX Frame Prep` -> LTX ...
+-> `Krish LTX Frame Restore` -> scale to the loader's `width`/`height` -> `Krish EXR Save` (`matte_to_alpha_keep_rgb`, `exr_meta`
+from the loader). Use the loader's `fps`, `width`, `height` where the video workflow used VHS Video Info.
+
+**Limits:** lossy DWAA/DWAB sources are re-compressed (second generation of loss) for channels the node does not change; the
+report warns, and choosing `ZIP`/`PIZ` keeps them bit-identical to the decoded source. Half output is clamped to +-65504 instead of
+overflowing to inf. Deep EXR and subsampled (YC) channels are not supported. If the source frame is gone at save time, the header
+stored at load time is used and only the channels you write are saved.
