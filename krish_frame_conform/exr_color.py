@@ -6,7 +6,7 @@ Only the transfer function changes: primaries are never converted, and the EXR h
 """
 import torch
 
-TRANSFORMS = ["sRGB", "Rec.709", "gamma 2.2", "gamma 2.4", "none"]
+TRANSFORMS = ["sRGB", "Rec.709", "gamma 2.2", "gamma 2.4", "none", "ACEScct (log, invertible)"]
 HIGHLIGHTS = ["clip", "soft_knee"]
 
 
@@ -38,7 +38,25 @@ def _gamma_eotf(g):
     return lambda y: torch.sign(y) * y.abs() ** g
 
 
+# ACEScct (Academy S-2016-001): a log curve whose 0..1 covers scene-linear -0.0069 .. 222.9, so highlights survive
+# the trip into a model and can be recovered exactly. Curve only: no primaries conversion.
+_CCT_A, _CCT_B = 10.5402377416545, 0.0729055341958355
+_CCT_LIN_CUT, _CCT_ENC_CUT = 0.0078125, 0.155251141552511
+ACESCCT_MAX_LINEAR = 2.0 ** (17.52 - 9.72)
+
+
+def acescct_encode(x):
+    return torch.where(x <= _CCT_LIN_CUT, _CCT_A * x + _CCT_B,
+                       (torch.log2(x.clamp_min(_CCT_LIN_CUT)) + 9.72) / 17.52)
+
+
+def acescct_decode(y):
+    return torch.where(y <= _CCT_ENC_CUT, (y - _CCT_B) / _CCT_A, 2.0 ** (y.clamp_min(_CCT_ENC_CUT) * 17.52 - 9.72))
+
+
 def _curves(name):
+    if name.startswith("ACEScct"):
+        return acescct_encode, acescct_decode
     if name == "sRGB":
         return _srgb_oetf, _srgb_eotf
     if name == "Rec.709":
@@ -66,7 +84,7 @@ def soft_knee(x, knee=0.8):
 def linear_to_display(images, transform="sRGB", exposure_stops=0.0, highlights="clip"):
     """Scene-linear -> display-referred for the model. 'clip' ends with a hard 0..1 clamp."""
     x = images.float() * (2.0 ** float(exposure_stops))
-    if highlights == "soft_knee":
+    if highlights == "soft_knee" and not transform.startswith("ACEScct"):   # the log already holds the range
         x = soft_knee(x.clamp_min(0))
     y = _curves(transform)[0](x)
     return y.clamp(0, 1) if highlights == "clip" else y.clamp_min(0)

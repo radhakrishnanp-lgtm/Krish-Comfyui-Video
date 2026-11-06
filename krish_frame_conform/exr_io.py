@@ -224,6 +224,16 @@ def describe_color(header):
     return "; ".join(lines)
 
 
+def suggest_encoding(header):
+    """Is this plate scene-linear or display-referred, judging by its tags? Report only; nothing is converted."""
+    tags = " ".join(str(header.get(k, "")) for k in ("colorInteropID", "oiio:ColorSpace", "colorspace", "ColorSpace")).lower()
+    if any(m in tags for m in ("lin_", "linear", "acescg", "2065", "scene")):
+        return "scene-linear (tags) -> use ACEScct if colour must come back from the model; sRGB is fine for a matte input"
+    if any(m in tags for m in ("srgb", "rec709_display", "display", "gamma", "rec.709")):
+        return "display-referred (tags) -> use transform 'none' so the model sees the stored values"
+    return "no colour tags -> OpenEXR convention is scene-linear; treat as linear"
+
+
 # ------------------------------------------------------------------ writing
 def _to_dtype(arr, dtype):
     a = np.ascontiguousarray(arr)

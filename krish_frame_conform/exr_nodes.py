@@ -90,6 +90,7 @@ class KrishEXRLoad:
                  f"layer: '{layer or 'main'}' channels: {sorted(names)}  alpha: {'yes' if have_a else 'no'}",
                  f"compression: {comp}  parts: {len(frames[0]['headers'])}  fps: {fps if fps else f'not in file (using {fallback_fps})'}",
                  f"color: {exr_io.describe_color(h0)}",
+                 f"encoding hint: {exr_io.suggest_encoding(h0)}",
                  f"value range: {float(images.min()):.4f} .. {float(images.max()):.4f}  "
                  f"({float((images > 1).float().mean()) * 100:.2f}% of samples above 1.0, "
                  f"{float((images < 0).float().mean()) * 100:.2f}% below 0; nothing is clamped)"]

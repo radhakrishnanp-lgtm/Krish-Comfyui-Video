@@ -83,7 +83,7 @@ If it is missing, only the EXR nodes report that; the LTX nodes are unaffected.
 |---|---|
 | **Krish EXR Load** | File, folder or pattern (`plate.%04d.exr`, `plate.####.exr`) -> unclamped float32 `images`, true `alpha`, `exr_meta`, `info`, frame count, width, height, **fps from the file**. Pick a `layer` / `part_index` for AOVs and multi-part files. |
 | **Krish EXR Save** | For every frame it re-opens the **original EXR** and replaces only the channels you choose, so everything else is carried over as it was. Output keeps the **source frame numbers**. |
-| **Krish EXR Linear -> Display** | Scene-linear -> display 0..1 for models (sRGB / Rec.709 / gamma, exposure, `clip` or `soft_knee`). |
+| **Krish EXR Linear -> Display** | Scene-linear -> display 0..1 for models (sRGB / Rec.709 / gamma / **ACEScct log**, exposure, `clip` or `soft_knee`). |
 | **Krish EXR Display -> Linear** | Inverse curve, never clamps. |
 
 **Save modes:** `replace_rgb` (images become R,G,B(,A)) | `matte_to_alpha_keep_rgb` (source RGB untouched, matte in A) |
@@ -106,3 +106,10 @@ from the loader). Use the loader's `fps`, `width`, `height` where the video work
 report warns, and choosing `ZIP`/`PIZ` keeps them bit-identical to the decoded source. Half output is clamped to +-65504 instead of
 overflowing to inf. Deep EXR and subsampled (YC) channels are not supported. If the source frame is gone at save time, the header
 stored at load time is used and only the channels you write are saved.
+
+**Which transform?** Mattes and other data you only *read* from the model need no way back, so `sRGB` + `clip` is fine. If the
+model's **colour output returns to the EXR** (restyle, deblur, fill, upscale), use `ACEScct (log, invertible)`: its 0..1 covers
+scene-linear -0.0069 .. 222.9, and `Display -> Linear` with the same setting is its exact inverse, so highlights come back
+instead of clipping at 1.0. It is a curve only (no primaries conversion). Keep bit depth high end to end: quantisation is
+magnified by the inverse curve (8-bit ACEScct is about 4.9% per step in linear), so save EXR (or 16-bit+), never 8-bit video, in
+the middle of the chain. The loader's `info` prints an `encoding hint` read from the file's colour tags.

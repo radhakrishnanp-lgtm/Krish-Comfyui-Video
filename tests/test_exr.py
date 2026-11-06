@@ -501,3 +501,32 @@ def test_end_to_end_matte_pipeline_with_ltx_padding(tmp_path):
         assert float(oc["R"].max()) > 1
         assert oh["colorInteropID"] == "lin_ap0_scene" and oh["owner"] == "Pixstone"
         assert exr_io.fps_from_header(oh) == 24.0 and oc["A"].shape == (H, W)
+
+
+# ------------------------------------------------------------------ ACEScct (invertible log encoding)
+def test_acescct_matches_the_published_values_and_is_continuous():
+    x = torch.tensor([0.0, 0.18, 1.0, 222.86, -0.0069])
+    y = exr_color.acescct_encode(x)
+    assert abs(float(y[1]) - 0.4135884) < 1e-6                         # mid grey (Academy spec value)
+    assert abs(float(y[0]) - 0.0729055) < 1e-6 and abs(float(y[3]) - 1.0) < 1e-3 and abs(float(y[4])) < 2e-4
+    cut = torch.tensor([0.0078125 - 1e-7, 0.0078125 + 1e-7])
+    assert abs(float(exr_color.acescct_encode(cut)[0] - exr_color.acescct_encode(cut)[1])) < 1e-5
+
+
+def test_acescct_round_trip_keeps_hdr_highlights():
+    x = torch.cat([torch.linspace(-0.006, 0.02, 200), torch.logspace(-2, 2.3, 400)])
+    back = exr_color.acescct_decode(exr_color.acescct_encode(x))
+    assert bool(((back - x).abs() <= 1e-5 * (1 + x.abs())).all())
+    sorted_y = exr_color.acescct_encode(x.sort().values)
+    assert bool((sorted_y[1:] >= sorted_y[:-1]).all())                 # monotonic
+    name = "ACEScct (log, invertible)"
+    hdr = torch.tensor([[[[0.18, 4.0, 37.0]]]])
+    enc = exr_color.linear_to_display(hdr, name, 0.0, "clip")
+    assert float(enc.max()) <= 1.0 and float(enc.min()) >= 0           # a valid model input
+    assert torch.allclose(exr_color.display_to_linear(enc, name), hdr, rtol=1e-4)   # 37.0 comes back, not 1.0
+
+
+def test_encoding_hint_reads_the_tags():
+    assert "scene-linear" in exr_io.suggest_encoding({"colorInteropID": "lin_ap1_scene"})
+    assert "display-referred" in exr_io.suggest_encoding({"oiio:ColorSpace": "srgb_rec709_display"})
+    assert "no colour tags" in exr_io.suggest_encoding({})
