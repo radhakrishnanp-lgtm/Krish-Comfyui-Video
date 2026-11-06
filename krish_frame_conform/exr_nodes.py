@@ -36,7 +36,7 @@ class KrishEXRLoad:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "path": ("STRING", {"default": "", "tooltip": "A frame, a folder, or a pattern like plate.%04d.exr / plate.####.exr"}),
+            "path": ("STRING", {"default": "", "tooltip": "A frame, a folder, or a pattern like plate.%04d.exr / plate.####.exr. Or use the upload button at the bottom of the node."}),
             "sequence_from_file": ("BOOLEAN", {"default": True, "tooltip": "If path is one frame, load its whole numbered sequence."}),
             "first_frame": ("INT", {"default": -1, "min": -1, "max": 10 ** 9, "tooltip": "Frame NUMBER from the file names. -1 = from the start."}),
             "last_frame": ("INT", {"default": -1, "min": -1, "max": 10 ** 9, "tooltip": "Frame NUMBER from the file names. -1 = to the end."}),

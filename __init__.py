@@ -12,4 +12,10 @@ if __package__:
     except Exception as _e:  # pragma: no cover
         print(f"[Krish] EXR nodes disabled: {_e}")
 
-    __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+    WEB_DIRECTORY = "./web"  # krish_exr_upload.js: the upload button on Krish EXR Load
+    KRISH_PACK_VERSION = "0.4.0"
+    print(f"[Krish] Krish-Comfyui-Video {KRISH_PACK_VERSION} loaded: {len(NODE_CLASS_MAPPINGS)} nodes "
+          f"(EXR nodes: {'yes' if 'KrishEXRLoad' in NODE_CLASS_MAPPINGS else 'NO'}, "
+          f"merge node: {'yes' if 'KrishEXRKeepOriginalOutsideEdit' in NODE_CLASS_MAPPINGS else 'NO'})")
+
+    __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

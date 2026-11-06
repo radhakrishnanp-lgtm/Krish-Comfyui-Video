@@ -74,7 +74,8 @@ merge_view = new_node("PreviewAny", [3700, 620], [360, 110], [inp("source", "*")
 save_view = new_node("PreviewAny", [4100, 760], [360, 170], [inp("source", "*")], [], [], "EXR save report", None)
 new_node("Note", [-1100, -230], [560, 290], [], [],
          ["EXR IN / EXR OUT (Qwen 2.1 edit)\n"
-          "1. Krish EXR Load: set the file name (ComfyUI input folder or an absolute path). Single frame; the mask below must be the same size as the EXR.\n"
+          "0. Needs Krish-Comfyui-Video 0.4.0+. At start-up the console prints '[Krish] ... merge node: yes'. A red Krish node with UNKNOWN widgets means ComfyUI is still running an older copy: update the pack and restart.\n"
+          "1. Krish EXR Load: click 'choose EXR file(s) to upload' at the bottom of the node (or type a path). Single frame; the mask below must be the same size as the EXR.\n"
           "2. Linear -> Display (sRGB + soft_knee) gives Qwen a normal-looking image without clipping highlights or negatives.\n"
           "3. After the stitch, 'Keep Original Outside Edit' decodes ONLY the pixels Qwen changed; all other pixels are the original linear pixels, bit for bit.\n"
           "4. Krish EXR Save writes the same frame number, colour tags, metadata, half/float type and compression as the source ('_qwen' suffix) and verifies the header.\n"

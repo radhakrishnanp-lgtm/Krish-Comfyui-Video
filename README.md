@@ -120,3 +120,13 @@ inpaint workflow with the PNG plate replaced by `Krish EXR Load` -> `Linear -> D
 output replaced by `Krish EXR Keep Original Outside Edit` -> `Krish EXR Save`. Only the pixels Qwen changed are decoded; every other
 pixel is the original linear pixel, bit for bit (checked on a real 4096x2304 half-float PIZ frame: same header, timecode, fps,
 type, compression and frame number). The mask PNG must be the same size as the EXR. The original workflow file is not modified.
+
+## Upload button on Krish EXR Load
+`web/krish_exr_upload.js` adds **choose EXR file(s) to upload** at the bottom of the loader, like Load Image's upload button. It uses
+ComfyUI's standard `/upload/image` endpoint and saves into `ComfyUI/input/krish_exr/` with the original file names (overwriting, so
+numbered frames stay a sequence). Pick one frame and `path` is filled in; pick several numbered frames and `path` is set to the first
+one with `sequence_from_file` switched on. The button is never saved in the workflow, so existing workflows are unaffected.
+
+**Troubleshooting:** at start-up the console prints `[Krish] Krish-Comfyui-Video 0.4.0 loaded: N nodes (EXR nodes: yes, merge node: yes)`.
+A Krish node that is red with every widget named `UNKNOWN` means ComfyUI does not know that node: it is still running an older
+copy of the pack. Update the folder, restart ComfyUI (not just the browser), and check that line.
