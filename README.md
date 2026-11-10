@@ -142,3 +142,40 @@ frames download one `.zip`), or switch on `auto_download` to download automatica
 (`/krish/exr/file`, `/krish/exr/zip`) that only hand out files this node has just written, by an unguessable id, never an arbitrary path.
 The start-up line `[Krish] ... download endpoint: yes` confirms they are installed. The id list is kept in memory: after a ComfyUI restart,
 run the workflow again to download.
+
+## Krish Inpaint Crop / Stitch (own implementation)
+Cut the edit region out of a big image for a model, then put the result back so everything outside the edit is the **original
+pixels bit for bit** and the seam is invisible. Studied while designing: lquesada's *Inpaint-CropAndStitch* and HallettVisual's
+*Smart Image Crop and Stitch* (Apache-2.0); the code here is original and fixes the issues found in that style of node.
+
+**Krish Inpaint Crop** (`image`, `mask`) -> `stitcher`, `cropped_image`, `cropped_mask`, `preview`, `info` (same first three outputs as
+InpaintCropImproved, so it drops in).
+- exact integer crop box around the mask (x `context_scale`, at least `context_pixels`), the box stays inside the image, and the model size
+  is a multiple of `size_multiple` (16 for Qwen/Flux); the two scale factors are stored, so the stitch applies the exact inverse
+- `size_mode`: `megapixels` (default 2.0), `longest_side`, `fixed`, or `native (no resize)` (no resampling at all: exact pixels)
+- mask: threshold (light greys count), hole filling, grow/shrink; empty mask = pass-through; a mask of another size is resized
+- resampling picks its filter by direction (antialiased bicubic when shrinking, bicubic when enlarging; never `area` for enlarging, which
+  is nearest-neighbour); results are limited to the source range (no ringing), nothing is clipped to 0..1, so HDR is safe
+
+**Krish Inpaint Stitch** (`stitcher`, `inpainted_image`) -> `image`, `blend_mask`, `report`.
+- blend follows the **mask shape**: 1 inside, a smoothstep falloff outward (`feather` auto = 10% of the mask size), exactly 0 beyond it
+  (`box_feather` and `hard` are also available). The whole crop box is not replaced, only the mask plus its feather
+- `align`: edit models re-render the crop slightly shifted. The shift is measured on the untouched surroundings (phase correlation
+  refined to a few hundredths of a pixel, robust to gain/offset/noise) and removed; applied only if it measurably reduces the mismatch
+- `color_match`: a smooth per-channel offset learned on the untouched surroundings and extended into the edit, so brightness and colour
+  drift do not show at the seam
+- a result of another size (e.g. rounded to the latent grid) or with an alpha channel (Qwen decodes 4 channels) is handled
+- composite is `orig + alpha * (gen - orig)` and skipped where alpha is 0, so unchanged content stays bit-identical
+
+**Measured** (synthetic plate, model that shifts 0.37/-0.61 px, regrades by +6% and paints new content): surround error vs whole-box paste
+100% -> 23% (mask-shaped feather) -> 2.4% (plus alignment and colour field). Alignment alone on a pure shift: 0.25 px -> 76%, 0.5 px -> 50%,
+0.9 px -> 25%, 1.6 px -> 20% of the uncorrected surround error. A 4096x2304 frame crops in ~0.5 s and stitches in ~1.2 s (1.4 GB RAM).
+
+**Workflow:** `workflows/Qwen_2.1_Edit_EXR_KrishCrop.json` (`python3 tools/make_qwen_krish_crop_workflow.py <Qwen_2.1_Edit_EXR.json> <out.json>`)
+swaps the crop/stitch nodes in place and removes the `nearest-exact` rescale between crop and model (the crop already delivers an exact
+~2 MP, multiple-of-16 image, so the Qwen latent size equals the crop size).
+
+**Limits:** alignment is translation only (a model that also scales or warps leaves a residual); the colour field is additive and low
+frequency (it cannot fix a local colour change on purpose); a batch uses one union box for all frames; far-apart mask islands give one big
+box (run them separately); the result must show the same framing as the crop (as edit models do). scipy is used when present (it ships with
+ComfyUI) for exact distance and hole filling, with a pure-torch fallback.
