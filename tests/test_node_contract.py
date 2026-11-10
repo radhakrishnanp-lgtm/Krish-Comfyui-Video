@@ -62,7 +62,14 @@ def test_pack_exposes_the_web_extension():
     assert re.search(r'import \{ app \} from "\.\./\.\./scripts/app\.js"', text)
 
 
+def test_pack_exposes_the_download_extension():
+    text = (ROOT / PACK.WEB_DIRECTORY / "krish_exr_download.js").read_text()
+    assert '"KrishEXRSave"' in text and "/krish/exr/file" in text and "/krish/exr/zip" in text
+    assert "auto_download" in text and "serialize" in text
+    assert "auto_download" in NODES["KrishEXRSave"].INPUT_TYPES()["optional"]
+
+
 def test_pack_reports_its_version_and_nodes(capsys):
     _pack()
     out = capsys.readouterr().out
-    assert "Krish-Comfyui-Video" in out and "merge node: yes" in out
+    assert "Krish-Comfyui-Video 0.5.0" in out and "merge node: yes" in out and "download endpoint:" in out

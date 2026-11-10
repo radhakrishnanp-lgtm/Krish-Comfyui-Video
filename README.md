@@ -130,3 +130,15 @@ one with `sequence_from_file` switched on. The button is never saved in the work
 **Troubleshooting:** at start-up the console prints `[Krish] Krish-Comfyui-Video 0.4.0 loaded: N nodes (EXR nodes: yes, merge node: yes)`.
 A Krish node that is red with every widget named `UNKNOWN` means ComfyUI does not know that node: it is still running an older
 copy of the pack. Update the folder, restart ComfyUI (not just the browser), and check that line.
+
+## Remote server: where files are saved, and downloading a copy
+ComfyUI normally runs on a server and you work in a browser on another machine (port forward / remote desktop). **Krish EXR Save writes on
+the server**: `output_dir` is a folder on the server (absolute, e.g. `/mnt/shows/TD/exr`, or relative to the server's ComfyUI `output`
+folder). The `report` output starts with `SAVED ON THE COMFYUI SERVER: N file(s), X MB in <full path>`. The node always runs when you press
+Queue, even if nothing upstream changed, so a deleted output is written again.
+
+To get a copy on **your** machine: use the **download EXR copy** button at the bottom of the node (one frame downloads the `.exr`, several
+frames download one `.zip`), or switch on `auto_download` to download automatically after every run. Files are served by two endpoints
+(`/krish/exr/file`, `/krish/exr/zip`) that only hand out files this node has just written, by an unguessable id, never an arbitrary path.
+The start-up line `[Krish] ... download endpoint: yes` confirms they are installed. The id list is kept in memory: after a ComfyUI restart,
+run the workflow again to download.

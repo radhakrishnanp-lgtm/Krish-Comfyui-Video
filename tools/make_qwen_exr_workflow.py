@@ -68,17 +68,17 @@ save = new_node("KrishEXRSave", [4100, 330], [360, 400],
                 [inp("images", "IMAGE"), inp("exr_meta", "EXR_META"), inp("matte", "MASK", optional=True)],
                 [("paths", "STRING"), ("report", "STRING")],
                 ["replace_rgb", "krish_exr", "_qwen", "same_as_source", "same_as_source", "error", "overwrite", "strict",
-                 True, ""], "Krish EXR Save (same details as source)")
+                 True, "", True], "Krish EXR Save (same details as source)")
 info_view = new_node("PreviewAny", [-1100, 440], [440, 200], [inp("source", "*")], [], [], "EXR info (colour hint, value range)", None)
 merge_view = new_node("PreviewAny", [3700, 620], [360, 110], [inp("source", "*")], [], [], "Edit coverage", None)
 save_view = new_node("PreviewAny", [4100, 760], [360, 170], [inp("source", "*")], [], [], "EXR save report", None)
 new_node("Note", [-1100, -230], [560, 290], [], [],
          ["EXR IN / EXR OUT (Qwen 2.1 edit)\n"
-          "0. Needs Krish-Comfyui-Video 0.4.0+. At start-up the console prints '[Krish] ... merge node: yes'. A red Krish node with UNKNOWN widgets means ComfyUI is still running an older copy: update the pack and restart.\n"
+          "0. Needs Krish-Comfyui-Video 0.5.0+. At start-up the console prints '[Krish] ... merge node: yes'. A red Krish node with UNKNOWN widgets means ComfyUI is still running an older copy: update the pack and restart.\n"
           "1. Krish EXR Load: click 'choose EXR file(s) to upload' at the bottom of the node (or type a path). Single frame; the mask below must be the same size as the EXR.\n"
           "2. Linear -> Display (sRGB + soft_knee) gives Qwen a normal-looking image without clipping highlights or negatives.\n"
           "3. After the stitch, 'Keep Original Outside Edit' decodes ONLY the pixels Qwen changed; all other pixels are the original linear pixels, bit for bit.\n"
-          "4. Krish EXR Save writes the same frame number, colour tags, metadata, half/float type and compression as the source ('_qwen' suffix) and verifies the header.\n"
+          "4. Krish EXR Save writes the same frame number, colour tags, metadata, half/float type and compression as the source ('_qwen' suffix) and verifies the header. Files are saved on the ComfyUI SERVER (output_dir = a server folder; its full path is in the report); with auto_download on, a copy also downloads in your browser, and the button at the bottom of the node downloads it again on demand.\n"
           "The 8-bit PNG save is now only a display-encoded preview."],
          "READ ME", ("#432", "#653"))
 

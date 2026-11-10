@@ -5,7 +5,7 @@ import os
 import numpy as np
 import torch
 
-from . import exr_color, exr_io
+from . import exr_color, exr_download, exr_io
 
 CATEGORY = "Krish/EXR"
 
@@ -113,7 +113,7 @@ class KrishEXRSave:
             "mode": (SAVE_MODES, {"tooltip": "replace_rgb: images become R,G,B(,A). matte_to_alpha_keep_rgb: source RGB untouched, "
                                               "matte written to A. matte_only_alpha: file holds only the matte in A. "
                                               "matte_as_gray_rgb: R=G=B=matte."}),
-            "output_dir": ("STRING", {"default": "krish_exr", "tooltip": "Absolute, or relative to the ComfyUI output folder."}),
+            "output_dir": ("STRING", {"default": "krish_exr", "tooltip": "A folder on the ComfyUI SERVER (the machine that runs ComfyUI): absolute, or relative to the server's output folder."}),
             "name_suffix": ("STRING", {"default": "", "tooltip": "Inserted before the frame number, e.g. _matte -> plate_matte.0101.exr"}),
             "pixel_type": (["same_as_source", "half", "float"], {"tooltip": "Applies to channels this node writes; other channels keep their type."}),
             "compression": (["same_as_source"] + exr_io.COMPRESSIONS,),
@@ -124,6 +124,7 @@ class KrishEXRSave:
             "matte": ("MASK", {"tooltip": "True alpha (not inverted). If missing, the matte is taken from the images."}),
             "keep_other_channels": ("BOOLEAN", {"default": True, "tooltip": "Keep AOVs / other layers / other parts from the source."}),
             "note": ("STRING", {"default": "", "tooltip": "If set, stored in a 'krishProcessing' attribute. Empty = header unchanged."}),
+            "auto_download": ("BOOLEAN", {"default": False, "tooltip": "After saving on the server, also download a copy through your browser to the machine you work on. The button at the bottom of the node does the same on demand."}),
         }}
 
     RETURN_TYPES = ("STRING", "STRING")
@@ -131,8 +132,12 @@ class KrishEXRSave:
     FUNCTION = "run"
     CATEGORY = CATEGORY
 
+    @classmethod
+    def IS_CHANGED(cls, *args, **kwargs):
+        return float("nan")  # a save must happen every time you queue, even if nothing upstream changed
+
     def run(self, images, exr_meta, mode, output_dir, name_suffix, pixel_type, compression, size_mismatch, if_exists,
-            verify, matte=None, keep_other_channels=True, note=""):
+            verify, matte=None, keep_other_channels=True, note="", auto_download=False):
         frames = exr_meta["frames"]
         n = images.shape[0]
         if n != len(frames):
@@ -162,11 +167,15 @@ class KrishEXRSave:
                     m = (img[i][..., :3].mean(-1) if img.shape[-1] >= 3 else img[i][..., 0]).numpy()
             elif mt is not None:
                 m = mt[min(i, mt.shape[0] - 1)].numpy()
-            res = exr_io.write_frame(
-                src, [h for h in rec["headers"]], out_path, exr_meta["layer_map"], exr_meta["part_index"], mode,
-                rgb=img[i].numpy() if mode == "replace_rgb" else None, matte=m,
-                pixel_type=pixel_type, compression=compression, keep_other_channels=keep_other_channels,
-                size_mismatch=size_mismatch, note=note)
+            try:
+                res = exr_io.write_frame(
+                    src, [h for h in rec["headers"]], out_path, exr_meta["layer_map"], exr_meta["part_index"], mode,
+                    rgb=img[i].numpy() if mode == "replace_rgb" else None, matte=m,
+                    pixel_type=pixel_type, compression=compression, keep_other_channels=keep_other_channels,
+                    size_mismatch=size_mismatch, note=note)
+            except OSError as e:
+                raise OSError(f"cannot write {out_path} on the ComfyUI server: {e}. Choose an output_dir that the ComfyUI "
+                              f"process can write to.") from e
             paths.append(out_path)
             if verify != "off":
                 ignore = {"compression"} if compression != "same_as_source" else set()
@@ -181,7 +190,10 @@ class KrishEXRSave:
                     lines.append(f"WARNING: output compression is {res['compression']} (lossy). Any channel this node does not "
                                  f"change is re-compressed from its decoded values, a second generation of loss. Choose ZIP or "
                                  f"PIZ in 'compression' to keep untouched channels bit-identical to the decoded source.")
-        lines.insert(0, f"wrote {len([p for p in paths])} frame(s) to {out_dir}  mode: {mode}")
+        written = [p for p in paths if os.path.isfile(p)]
+        total_mb = sum(os.path.getsize(p) for p in written) / 1e6
+        lines.insert(0, f"SAVED ON THE COMFYUI SERVER: {len(written)} file(s), {total_mb:.1f} MB in {os.path.abspath(out_dir)}  "
+                        f"(mode: {mode}). Use the download button on this node to get a copy on your machine.")
         if verify != "off":
             lines.append("header check: " + ("all source attributes identical in every output frame" if not problems_all
                                               else f"{len(problems_all)} difference(s)"))
@@ -190,7 +202,8 @@ class KrishEXRSave:
         print("[KrishEXR] " + report.replace("\n", "\n[KrishEXR] "))
         if problems_all and verify == "strict":
             raise ValueError("EXR header verification failed (files were written; set verify to 'report' to accept):\n" + report)
-        return ("\n".join(paths), report)
+        _, entries = exr_download.register(paths)
+        return {"ui": {"krish_exr": entries}, "result": ("\n".join(paths), report)}
 
 
 class KrishEXRToDisplay:
@@ -279,3 +292,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "KrishEXRFromDisplay": "Krish EXR Display -> Linear",
     "KrishEXRKeepOriginalOutsideEdit": "Krish EXR Keep Original Outside Edit (decode + merge)",
 }
+
+
+exr_download.install_routes()  # serves /krish/exr/file and /krish/exr/zip when running inside ComfyUI

@@ -99,7 +99,8 @@ def save(images, meta, out, **kw):
                 pixel_type="same_as_source", compression="same_as_source", size_mismatch="error",
                 if_exists="overwrite", verify="strict")
     args.update(kw)
-    return NODES["KrishEXRSave"]().run(**args)
+    ret = NODES["KrishEXRSave"]().run(**args)
+    return ret["result"] if isinstance(ret, dict) else ret
 
 
 # ------------------------------------------------------------------ loading
@@ -444,9 +445,11 @@ def test_multipart_and_offset_windows_from_another_producer(tmp_path):
     p = str(src / "mp.0001.exr")
     out = oiio.ImageOutput.create(p)
     assert out.open(p, [s0, s1])
-    out.write_image((rng.random((H, W, 4)) * 5).astype("float32"))
+    beauty = np.ascontiguousarray((rng.random((H, W, 4)) * 5).astype("float32"))
+    depth = np.ascontiguousarray((rng.random((H, W, 1)) * 50).astype("float32"))
+    out.write_image(beauty)
     out.open(p, s1, "AppendSubimage")
-    out.write_image((rng.random((H, W)) * 50).astype("float32"))
+    out.write_image(depth)
     out.close()
     for part in (0, 1):
         images, alpha, meta, *_ = NODES["KrishEXRLoad"]().run(p, True, -1, -1, 1, "", part, 24.0)
@@ -456,7 +459,7 @@ def test_multipart_and_offset_windows_from_another_producer(tmp_path):
         b = OpenEXR.File(str(o / "mp.0001.exr"), separate_channels=True)
         assert len(a.parts) == len(b.parts) == 2
         for pa, pb in zip(a.parts, b.parts):
-            assert all(np.array_equal(np.array(pa.channels[k].pixels), np.array(pb.channels[k].pixels)) for k in pa.channels)
+            assert all(np.array(pa.channels[k].pixels).tobytes() == np.array(pb.channels[k].pixels).tobytes() for k in pa.channels)
 
     s = oiio.ImageSpec(W, H, 3, oiio.HALF)
     s.channelnames = ("R", "G", "B")
@@ -576,3 +579,117 @@ def test_from_display_node_can_undo_the_knee():
     back = NODES["KrishEXRFromDisplay"]().run(enc, "sRGB", 0.0, "soft_knee")[0]
     assert torch.allclose(back, x, rtol=2e-3)
     assert float(NODES["KrishEXRFromDisplay"]().run(enc, "sRGB", 0.0)[0].max()) < 2.0   # default does not undo it
+
+
+def test_nan_and_inf_pixels_pass_through_bit_exactly(tmp_path):
+    """Renderers do write NaN/Inf pixels; the node must neither fix nor spread them, and np.array_equal cannot see them."""
+    src = tmp_path / "src"
+    src.mkdir()
+    rng = np.random.default_rng(9)
+    ch = {k: rng.random((H, W)).astype("float32") for k in "RGB"}
+    ch["R"][2, 3], ch["G"][4, 5], ch["B"][6, 7], ch["R"][0, 0] = np.nan, np.inf, -np.inf, np.nan
+    ch["depth.Z"] = rng.random((H, W)).astype("float32")
+    ch["depth.Z"][1, 1] = np.nan
+    OpenEXR.File({"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage},
+                 {k: v.copy() for k, v in ch.items()}).write(str(src / "n.0001.exr"))
+    images, alpha, meta, *_ = NODES["KrishEXRLoad"]().run(str(src / "n.0001.exr"), True, -1, -1, 1, "", 0, 24.0)
+    assert bool(torch.isnan(images).any()) and bool(torch.isinf(images).any())          # reported honestly, never clamped
+    save(images, meta, tmp_path / "out")
+    (_, sc), = read_parts(src / "n.0001.exr")
+    (_, oc), = read_parts(tmp_path / "out" / "n.0001.exr")
+    assert set(sc) == set(oc)
+    assert all(sc[k].tobytes() == oc[k].tobytes() for k in sc)                           # raw bytes, NaN/Inf included
+
+
+# ------------------------------------------------------------------ Save node on a remote server + download payload
+class _FakeFolderPaths:
+    def __init__(self, root):
+        self.root = root
+
+    def get_output_directory(self):
+        return str(self.root / "output")
+
+    def get_input_directory(self):
+        return str(self.root / "input")
+
+
+def _save_raw(images, meta, **kw):
+    args = dict(images=images, exr_meta=meta, mode="replace_rgb", output_dir="krish_exr", name_suffix="_qwen",
+                pixel_type="same_as_source", compression="same_as_source", size_mismatch="error",
+                if_exists="overwrite", verify="strict")
+    args.update(kw)
+    return NODES["KrishEXRSave"]().run(**args)
+
+
+def test_save_writes_on_the_server_and_reports_the_exact_location(tmp_path, monkeypatch):
+    nodes_mod = sys.modules["krish_pack_exr.krish_frame_conform.exr_nodes"]
+    monkeypatch.setattr(nodes_mod, "folder_paths", _FakeFolderPaths(tmp_path / "server"))
+    make_source(tmp_path / "src")
+    images, alpha, meta, *_ = load(tmp_path / "src")
+    ret = _save_raw(images, meta)
+    paths, report = ret["result"]
+    out_dir = tmp_path / "server" / "output" / "krish_exr"                 # relative output_dir = the SERVER's output folder
+    assert sorted(p.name for p in out_dir.glob("*.exr")) == [f"plate_qwen.{fr}.exr" for fr in (1001, 1002, 1003)]
+    assert paths.splitlines() == [str(out_dir / f"plate_qwen.{fr}.exr") for fr in (1001, 1002, 1003)]
+    assert "SAVED ON THE COMFYUI SERVER: 3 file(s)" in report and str(out_dir) in report and "download button" in report
+    entries = ret["ui"]["krish_exr"]                                       # what the browser button uses
+    assert [e["name"] for e in entries] == [f"plate_qwen.{fr}.exr" for fr in (1001, 1002, 1003)]
+    assert len({e["batch"] for e in entries}) == 1 and all(set(e) == {"id", "name", "size", "batch"} for e in entries)
+
+
+def test_absolute_output_dir_on_the_server_is_honoured(tmp_path, monkeypatch):
+    nodes_mod = sys.modules["krish_pack_exr.krish_frame_conform.exr_nodes"]
+    monkeypatch.setattr(nodes_mod, "folder_paths", _FakeFolderPaths(tmp_path / "server"))
+    make_source(tmp_path / "src")
+    images, alpha, meta, *_ = load(tmp_path / "src")
+    show = tmp_path / "mnt" / "shows" / "TD" / "exr"
+    _save_raw(images, meta, output_dir=str(show))
+    assert len(list(show.glob("*.exr"))) == 3 and not (tmp_path / "server" / "output" / "krish_exr").exists()
+
+
+def test_save_runs_every_time_even_if_nothing_upstream_changed():
+    cls = NODES["KrishEXRSave"]
+    a, b = cls.IS_CHANGED(1, 2), cls.IS_CHANGED(1, 2)
+    assert a != a and b != b                                               # NaN never equals itself: ComfyUI re-executes the node
+
+
+def test_unwritable_folder_gives_an_actionable_error(tmp_path, monkeypatch):
+    nodes_mod = sys.modules["krish_pack_exr.krish_frame_conform.exr_nodes"]
+    monkeypatch.setattr(nodes_mod, "folder_paths", _FakeFolderPaths(tmp_path / "server"))
+    make_source(tmp_path / "src")
+    images, alpha, meta, *_ = load(tmp_path / "src")
+    blocker = tmp_path / "blocked"
+    blocker.write_text("a file, not a folder")                              # makedirs under a file fails like a permission error
+    with pytest.raises(OSError, match="on the ComfyUI server"):
+        _save_raw(images, meta, output_dir=str(blocker / "sub"))
+
+
+def test_files_written_by_save_are_downloadable_bit_for_bit(tmp_path, monkeypatch):
+    import asyncio
+    aiohttp = pytest.importorskip("aiohttp")
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    nodes_mod = sys.modules["krish_pack_exr.krish_frame_conform.exr_nodes"]
+    monkeypatch.setattr(nodes_mod, "folder_paths", _FakeFolderPaths(tmp_path / "server"))
+    make_source(tmp_path / "src")
+    images, alpha, meta, *_ = load(tmp_path / "src")
+    ret = _save_raw(images, meta)
+    entries = ret["ui"]["krish_exr"]
+    written = ret["result"][0].splitlines()
+
+    async def go():
+        routes = web.RouteTableDef()
+        nodes_mod.exr_download.add_routes(routes, str(tmp_path))
+        app = web.Application()
+        app.add_routes(routes)
+        async with TestClient(TestServer(app)) as c:
+            one = await (await c.get(f"/krish/exr/file?id={entries[0]['id']}")).read()
+            zipped = await (await c.get(f"/krish/exr/zip?batch={entries[0]['batch']}")).read()
+        return one, zipped
+
+    one, zipped = asyncio.run(go())
+    assert one == pathlib.Path(written[0]).read_bytes()
+    import io, zipfile
+    z = zipfile.ZipFile(io.BytesIO(zipped))
+    assert z.namelist() == [pathlib.Path(p).name for p in written]
+    assert all(z.read(pathlib.Path(p).name) == pathlib.Path(p).read_bytes() for p in written)

@@ -258,10 +258,10 @@ def _template(src_path, fallback_headers):
     """[(header dict, {name: Channel})] for every part of the source frame (headers only if the file is gone)."""
     if src_path and os.path.isfile(src_path):
         f = read_file(src_path)
-        return [(dict(p.header), dict(p.channels)) for p in f.parts], True
+        return [(dict(p.header), dict(p.channels)) for p in f.parts], True, f   # f must outlive the write
     if not fallback_headers:
         raise FileNotFoundError(f"source EXR is gone and no stored header is available: {src_path}")
-    return [(dict(h), {}) for h in fallback_headers], False
+    return [(dict(h), {}) for h in fallback_headers], False, None
 
 
 def write_frame(src_path, fallback_headers, out_path, layer_map, part_index, mode, rgb=None, matte=None, *,
@@ -269,7 +269,7 @@ def write_frame(src_path, fallback_headers, out_path, layer_map, part_index, mod
                 size_mismatch="error", note=""):
     """Write one frame. mode: replace_rgb | matte_to_alpha_keep_rgb | matte_only_alpha | matte_as_gray_rgb."""
     oe = _oe()
-    parts, have_src = _template(src_path, fallback_headers)
+    parts, have_src, keepalive = _template(src_path, fallback_headers)
     hdr, chans = parts[part_index]
     H, W = part_size(hdr)
 
@@ -368,6 +368,7 @@ def write_frame(src_path, fallback_headers, out_path, layer_map, part_index, mod
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
+    del keepalive  # the source File (which owns the pass-through channels) is only released after the write
     return {"path": out_path, "channels": {n: str(np.asarray(getattr(c, "pixels", c)).dtype) for n, c in out_chans.items()},
             "compression": str(new_hdr.get("compression")).split(".")[-1], "size": (W, H), "template_found": have_src}
 
