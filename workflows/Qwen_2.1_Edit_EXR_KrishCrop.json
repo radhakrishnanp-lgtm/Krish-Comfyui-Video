@@ -1026,7 +1026,7 @@
         "mask_feather",
         "auto",
         24,
-        "translation",
+        "affine",
         12,
         "low_frequency",
         1.0,
@@ -1505,7 +1505,7 @@
         "Node name for S&R": "Note"
       },
       "widgets_values": [
-        "KRISH INPAINT CROP / STITCH (replaces InpaintCropImproved / InpaintStitchImproved + the nearest-exact rescale)\n- Crop: exact integer crop box around the mask (x context_scale), scaled to ~2 MP with a size that is a multiple of 16, so the Qwen latent size == the crop size and nothing is rescaled in between. Shrinking is antialiased, enlarging is bicubic, nothing is clipped.\n- Stitch: pixels outside the blend are the ORIGINAL pixels (bit for bit). The blend follows the mask shape (feather 'auto' = 10% of the mask size, exactly 0 beyond it).\n- Qwen re-renders the whole crop, so it drifts a little: the stitch measures a sub-pixel shift and a smooth colour/brightness difference on the UNTOUCHED surroundings and corrects them before blending (align / color_match; the Stitch report shows what was applied).\n- For pixel-exact work without any resize set size_mode to 'native (no resize)'.\n- Needs Krish-Comfyui-Video 0.6.0+ (console: '... inpaint nodes: yes')."
+        "KRISH INPAINT CROP / STITCH (replaces InpaintCropImproved / InpaintStitchImproved + the nearest-exact rescale)\n- Crop: exact integer crop box around the mask (x context_scale), scaled to ~2 MP with a size that is a multiple of 16, so the Qwen latent size == the crop size and nothing is rescaled in between. Shrinking is antialiased, enlarging is bicubic, nothing is clipped.\n- Stitch: pixels outside the blend are the ORIGINAL pixels (bit for bit). The blend follows the mask shape (feather 'auto' = 10% of the mask size, exactly 0 beyond it).\n- Qwen re-renders the whole crop, so it drifts a little: the stitch measures a sub-pixel shift and a smooth colour/brightness difference on the UNTOUCHED surroundings and corrects them before blending (align / color_match; the Stitch report shows what was applied).\n- For pixel-exact work without any resize set size_mode to 'native (no resize)'.\n- Needs Krish-Comfyui-Video 0.6.1+ (console: '... inpaint nodes: yes')."
       ],
       "color": "#432",
       "bgcolor": "#653"
