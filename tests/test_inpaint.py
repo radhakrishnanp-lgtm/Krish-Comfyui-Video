@@ -312,3 +312,48 @@ def test_hole_filling_without_scipy_matches_scipy_exactly(monkeypatch):
         monkeypatch.setattr(ic, "_ndi", None)
         assert np.array_equal(ic._fill_holes_one(m), expected)
         monkeypatch.undo()
+
+
+# ---- affine alignment (model re-renders the crop slightly zoomed / rotated)
+def _affine_case(scale, rot):
+    g = torch.Generator().manual_seed(5)
+    n = torch.nn.functional.avg_pool2d(torch.rand(1, 3, 808, 1208, generator=g), 7, 1, 3)[:, :, 4:-4, 4:-4]
+    img = n.permute(0, 2, 3, 1).contiguous()
+    H, W = 800, 1200
+    mask = torch.zeros(1, H, W); mask[:, 300:500, 500:700] = 1
+    st, crop, cm, _ = ic.crop(img, mask, size_mode="native")
+    th = math.radians(rot)
+    B, h, w, C = crop.shape
+    ys, xs = torch.meshgrid(torch.arange(h, dtype=torch.float32), torch.arange(w, dtype=torch.float32), indexing="ij")
+    xc, yc = xs - (w - 1) / 2, ys - (h - 1) / 2
+    sx = (xc * math.cos(th) - yc * math.sin(th)) / scale + (w - 1) / 2
+    sy = (xc * math.sin(th) + yc * math.cos(th)) / scale + (h - 1) / 2
+    grid = torch.stack([(sx + 0.5) / w * 2 - 1, (sy + 0.5) / h * 2 - 1], -1)[None]
+    gen = torch.nn.functional.grid_sample(crop.permute(0, 3, 1, 2), grid, mode="bicubic", padding_mode="border", align_corners=False).permute(0, 2, 3, 1)
+    return img, st, gen
+
+
+def _ring_err(out, img, st):
+    p = st["plan"]
+    sl = (slice(None), slice(p["y"] + 8, p["y"] + p["bh"] - 8), slice(p["x"] + 8, p["x"] + p["bw"] - 8))
+    m = st["core"][0, sl[1], sl[2]] == 0
+    return float((out[0, sl[1], sl[2]] - img[0, sl[1], sl[2]]).abs().mean(-1)[m].mean())
+
+
+def test_affine_alignment_beats_translation_on_zoom_and_rotation():
+    img, st, gen = _affine_case(1.01, 0.2)
+    off, _, _ = ic.stitch(st, gen, align="off", color_match="off")
+    tr, _, _ = ic.stitch(st, gen, align="translation", color_match="off")
+    af, _, rep = ic.stitch(st, gen, align="affine", color_match="off")
+    assert "zoom" in rep
+    assert _ring_err(af, img, st) < _ring_err(tr, img, st) * 0.7
+    assert _ring_err(af, img, st) < _ring_err(off, img, st) * 0.5
+
+
+def test_affine_alignment_is_a_noop_on_identical_content():
+    img, st, gen = _affine_case(1.0, 0.0)
+    out, _, rep = ic.stitch(st, gen, align="affine", color_match="off")
+    assert "no alignment applied" in rep
+    p = st["plan"]
+    outside = st["core"][0] == 0
+    assert torch.equal(out[0][outside][:1], img[0][outside][:1])

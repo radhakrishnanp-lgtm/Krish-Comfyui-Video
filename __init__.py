@@ -22,7 +22,7 @@ if __package__:
         print(f"[Krish] inpaint nodes disabled: {_e}")
 
     WEB_DIRECTORY = "./web"  # krish_exr_upload.js: the upload button on Krish EXR Load
-    KRISH_PACK_VERSION = "0.6.0"
+    KRISH_PACK_VERSION = "0.6.1"
     print(f"[Krish] Krish-Comfyui-Video {KRISH_PACK_VERSION} loaded: {len(NODE_CLASS_MAPPINGS)} nodes "
           f"(EXR nodes: {'yes' if 'KrishEXRLoad' in NODE_CLASS_MAPPINGS else 'NO'}, "
           f"merge node: {'yes' if 'KrishEXRKeepOriginalOutsideEdit' in NODE_CLASS_MAPPINGS else 'NO'}, "

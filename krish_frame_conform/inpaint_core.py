@@ -374,6 +374,101 @@ def shift_image(img_bhwc, dx, dy):
     return torch.minimum(torch.maximum(out, lo), hi).permute(0, 2, 3, 1).contiguous()
 
 
+def warp_affine(img_bhwc, tx, ty, m=(0.0, 0.0, 0.0, 0.0)):
+    """Sample img at x' = x + tx + m0*u + m1*v, y' = y + ty + m2*u + m3*v, where (u, v) are pixel offsets from the centre
+    divided by half the image size (so m is a dimensionless scale / rotation term). Bicubic, edges replicate."""
+    B, H, W, C = img_bhwc.shape
+    t = img_bhwc.permute(0, 3, 1, 2).float()
+    ys, xs = torch.meshgrid(torch.arange(H, device=t.device, dtype=torch.float32),
+                            torch.arange(W, device=t.device, dtype=torch.float32), indexing="ij")
+    u, v = (xs - (W - 1) / 2) / (W / 2), (ys - (H - 1) / 2) / (H / 2)
+    sx = xs + tx + m[0] * u + m[1] * v
+    sy = ys + ty + m[2] * u + m[3] * v
+    grid = torch.stack([(sx + 0.5) / W * 2 - 1, (sy + 0.5) / H * 2 - 1], dim=-1)[None].expand(B, -1, -1, -1)
+    out = F.grid_sample(t, grid, mode="bicubic", padding_mode="border", align_corners=False)
+    lo, hi = t.amin(dim=(0, 2, 3), keepdim=True), t.amax(dim=(0, 2, 3), keepdim=True)
+    return torch.minimum(torch.maximum(out, lo), hi).permute(0, 2, 3, 1).contiguous()
+
+
+def _lk_affine(a, b, w, p, iters=8):
+    """Gauss-Newton refinement of p = (tx, ty, m0, m1, m2, m3) minimising sum w * (a - warp(b, p))^2 on [1,h,w] tensors."""
+    h, wd = a.shape[1:]
+    ys, xs = torch.meshgrid(torch.arange(h, device=a.device, dtype=torch.float32),
+                            torch.arange(wd, device=a.device, dtype=torch.float32), indexing="ij")
+    u, v = ((xs - (wd - 1) / 2) / (wd / 2))[None], ((ys - (h - 1) / 2) / (h / 2))[None]
+    wm = w.clone()
+    wm[:, :2, :], wm[:, -2:, :], wm[:, :, :2], wm[:, :, -2:] = 0, 0, 0, 0
+    best_err, best_p = None, list(p)
+    for _ in range(iters):
+        warped = warp_affine(b[..., None], *p[:2], p[2:])[..., 0]
+        err_map = a - warped
+        e = float((wm * err_map * err_map).sum())
+        if best_err is None or e < best_err:
+            best_err, best_p = e, list(p)
+        elif e > best_err:
+            break
+        gx, gy = torch.zeros_like(warped), torch.zeros_like(warped)
+        gx[:, :, 1:-1] = (warped[:, :, 2:] - warped[:, :, :-2]) * 0.5
+        gy[:, 1:-1, :] = (warped[:, 2:, :] - warped[:, :-2, :]) * 0.5
+        J = torch.stack([gx, gy, gx * u, gx * v, gy * u, gy * v], dim=0).reshape(6, -1)
+        wf, ef = wm.reshape(-1), err_map.reshape(-1)
+        H = (J * wf) @ J.T + 1e-6 * torch.eye(6, device=a.device)
+        g = (J * wf) @ ef
+        try:
+            dp = torch.linalg.solve(H.double(), g.double()).float()
+        except Exception:
+            break
+        p = [p[i] + float(dp[i]) for i in range(6)]
+        if float(dp[:2].abs().max()) < 1e-3 and float(dp[2:].abs().max()) < 1e-4:
+            break
+    warped = warp_affine(b[..., None], *p[:2], p[2:])[..., 0]
+    e = float((wm * (a - warped) ** 2).sum())
+    if best_err is not None and e > best_err:
+        p = best_p
+    return p
+
+
+def estimate_warp(orig_box, gen_box, weight_bhw, max_dim=1536):
+    """Shift + scale + rotation (affine) to APPLY to gen (via warp_affine) so it lines up with orig on the untouched ring.
+
+    Starts from the phase-correlation shift, refines translation, then fits the full affine coarse-to-fine.
+    Returns (tx, ty, m, confidence, improvement, max_corner_px)."""
+    a, b, w = _luma(orig_box)[:1], _luma(gen_box)[:1], weight_bhw[:1].float()
+    h0, w0 = a.shape[1:]
+    k = max(1, int(math.ceil(max(h0, w0) / max_dim)))
+    if k > 1:
+        a, b, w = (F.avg_pool2d(t.unsqueeze(1), k, k, ceil_mode=True).squeeze(1) for t in (a, b, w))
+    h, wd = a.shape[1:]
+    if h < 16 or wd < 16 or float(w.sum()) < 64:
+        return 0.0, 0.0, (0.0, 0.0, 0.0, 0.0), 0.0, 0.0, 0.0
+    a, b = _normalize_ring(a, w), _normalize_ring(b, w)
+    ws = w / w.sum()
+    ma, mb = (a * ws).sum(), (b * ws).sum()
+    hann = (torch.hann_window(h, periodic=False, device=a.device)[:, None] * torch.hann_window(wd, periodic=False, device=a.device)[None, :])[None]
+    fa, fb = torch.fft.rfft2((a - ma) * w * hann), torch.fft.rfft2((b - mb) * w * hann)
+    cross = fa * torch.conj(fb)
+    r = torch.fft.irfft2(cross / (cross.abs() + 1e-8), s=(h, wd))[0]
+    idx = int(torch.argmax(r))
+    py, px = divmod(idx, wd)
+    peak = float(r[py, px])
+    sy = py - (h if py > h / 2 else 0)
+    sx = px - (wd if px > wd / 2 else 0)
+    tx, ty = _lk_refine(a, b, w, float(-sx), float(-sy))
+    p = [tx, ty, 0.0, 0.0, 0.0, 0.0]
+    base = float((w * (a - b).abs()).sum() / w.sum())
+    if min(h, wd) >= 96:                                         # coarse level first: wider capture range for zoom / rotation
+        a2, b2, w2 = (F.avg_pool2d(t.unsqueeze(1), 2, 2, ceil_mode=True).squeeze(1) for t in (a, b, w))
+        q = _lk_affine(a2, b2, w2, [p[0] / 2, p[1] / 2, 0, 0, 0, 0])
+        p = [q[0] * 2, q[1] * 2, q[2] * 2, q[3] * 2, q[4] * 2, q[5] * 2]
+    p = _lk_affine(a, b, w, p)
+    after = float((w * (a - warp_affine(b[..., None], p[0], p[1], p[2:])[..., 0]).abs()).sum() / w.sum())
+    improvement = 0.0 if base <= 1e-12 else (base - after) / base
+    corners = [(sgn_u, sgn_v) for sgn_u in (-1, 1) for sgn_v in (-1, 1)]
+    mx = max(math.hypot(p[0] + p[2] * cu + p[3] * cv, p[1] + p[4] * cu + p[5] * cv) for cu, cv in corners)
+    # translate to full resolution: shifts scale by k; m is dimensionless so it carries over unchanged
+    return p[0] * k, p[1] * k, (p[2] * k, p[3] * k, p[4] * k, p[5] * k), peak, improvement, mx * k
+
+
 # ------------------------------------------------------------------ colour (low-frequency field from the untouched ring)
 def lowfreq_correction(orig_box, gen_box, weight_bhw, sigma_px):
     """Smooth per-channel offset that makes gen match orig on the ring, extended smoothly into the edit."""
@@ -423,7 +518,7 @@ def crop(image, mask, *, threshold=0.01, fill_holes=True, grow=0, edge_pad="refl
     return st, cropped, cmask, info
 
 
-def stitch(stitcher, generated, *, blend_mode="mask_feather", feather_mode="auto", feather_pixels=24, align="translation",
+def stitch(stitcher, generated, *, blend_mode="mask_feather", feather_mode="auto", feather_pixels=24, align="affine",
            max_shift_px=12, min_shift_px=0.05, min_confidence=0.08, color_match="low_frequency", color_amount=1.0,
            color_sigma=0, ring_margin=0, resample="bicubic"):
     """Returns (image, blend_mask [B,H,W], report str)."""
@@ -454,7 +549,18 @@ def stitch(stitcher, generated, *, blend_mode="mask_feather", feather_mode="auto
         margin = int(ring_margin) if ring_margin > 0 else max(4, feather)
         ring = 1.0 - _morph(core_box, margin, True)
 
-        if align == "translation":
+        if align == "affine":
+            tx, ty, mm, conf, gain, mx = estimate_warp(orig_box, gen_box, ring)
+            mag = max(math.hypot(tx, ty), mx)
+            if (conf >= min_confidence or gain >= 0.15) and gain >= 0.05 and min_shift_px <= mag <= max_shift_px * 1.5:
+                gen_box = warp_affine(gen_box, tx, ty, mm)
+                zoom = 1.0 + 0.5 * (mm[0] / (bw / 2) + mm[3] / (bh / 2))
+                rot = math.degrees(0.5 * (mm[2] / (bw / 2) - mm[1] / (bh / 2)))
+                lines.append(f"[{b}] aligned the result: shift ({tx:+.2f}, {ty:+.2f}) px, zoom {zoom:.4f}, rotation {rot:+.3f} deg, "
+                             f"max {mx:.1f} px at the box corners (confidence {conf:.2f}, ring mismatch -{gain:.0%})")
+            else:
+                lines.append(f"[{b}] no alignment applied (measured {tx:+.2f}, {ty:+.2f} px, max {mx:.1f} px, confidence {conf:.2f}, gain {gain:+.0%})")
+        elif align == "translation":
             dx, dy, conf, gain = estimate_shift(orig_box, gen_box, ring)
             mag = math.hypot(dx, dy)
             if conf >= min_confidence and gain >= 0.05 and min_shift_px <= mag <= max_shift_px:
