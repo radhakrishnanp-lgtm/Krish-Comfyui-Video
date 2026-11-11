@@ -74,7 +74,7 @@ def test_plan_invariants_for_any_size_and_mask_position(H, W, size_mode):
         x0b, y0b = p["x"], p["y"]
         assert p["x"] <= bbox[0] and p["x"] + p["bw"] >= bbox[2] and p["y"] <= bbox[1] and p["y"] + p["bh"] >= bbox[3]
         assert abs(p["sx"] - p["tw"] / p["bw"]) < 1e-12 and abs(p["sy"] - p["th"] / p["bh"]) < 1e-12
-        assert p["sx"] <= 4.0 + 1e-6 or size_mode == "fixed"
+        assert p["sx"] <= 4.0 * 1.03 or size_mode == "fixed"                                      # rounding to the multiple may land a hair over the cap
         if p["bw"] <= W:                                                                            # fits: stays inside the image
             assert 0 <= p["x"] and p["x"] + p["bw"] <= W and p["pad"][0] == p["pad"][2] == 0
         if p["bh"] <= H:
@@ -429,3 +429,23 @@ def test_mask_aspect_mismatch_is_flagged():
     assert "WARNING" in info and "STRETCHED" in info
     _, _, _, info2 = ic.crop(img, torch.zeros(1, 230, 410).index_fill_(1, torch.arange(10, 50), 1.0))
     assert "WARNING" not in info2
+
+
+@pytest.mark.parametrize("mp,shape", [(2.0, "region"), (2.0, "square"), (1.0, "region"), (4.0, "region")])
+@pytest.mark.parametrize("size", [(1920, 1080), (4096, 2304), (7680, 4320)])
+@pytest.mark.parametrize("mbox", [(0.1, 0.1, 0.4, 0.5), (0.5, 0.2, 0.52, 0.24), (0.0, 0.0, 1.0, 1.0)])
+def test_megapixels_mode_hits_the_requested_size_for_any_input_size(mp, shape, size, mbox):
+    W, H = size
+    x0, y0, x1, y1 = int(mbox[0] * W), int(mbox[1] * H), max(int(mbox[2] * W), int(mbox[0] * W) + 8), max(int(mbox[3] * H), int(mbox[1] * H) + 8)
+    plan = ic.plan_crop(H, W, (x0, y0, x1, y1), size_mode="megapixels", megapixels=mp, shape=shape)
+    assert plan["tw"] % 16 == 0 and plan["th"] % 16 == 0
+    assert abs(plan["tw"] * plan["th"] / (mp * 1048576) - 1) < 0.045          # within ~4 % of the requested pixel count
+    assert plan["bw"] >= x1 - x0 and plan["bh"] >= y1 - y0                      # whole edit region inside the box
+    if shape == "square":
+        assert plan["tw"] == plan["th"]
+    assert abs(plan["sx"] / plan["sy"] - 1) < 0.02                              # uniform scale
+
+
+def test_two_megapixels_binary_is_2048_by_1024_for_a_2_to_1_region():
+    plan = ic.plan_crop(2304, 4096, (1000, 600, 1000 + 1200, 600 + 600), size_mode="megapixels", megapixels=2.0, context_scale=1.0, context_pixels=0)
+    assert (plan["tw"], plan["th"]) == (2048, 1024)

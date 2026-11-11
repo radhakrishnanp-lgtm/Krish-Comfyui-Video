@@ -131,8 +131,25 @@ def mask_bbox(core_bhw):
 SIZE_MODES = ["megapixels", "longest_side", "fixed", "native (no resize)"]
 
 
+def fit_megapixels(target_px, aspect, multiple):
+    """(width, height), both multiples of `multiple`, whose area is as close to target_px as possible while keeping the
+    aspect ratio (width / height) within a fraction of a percent."""
+    th0 = round_to_multiple(math.sqrt(target_px / aspect), multiple)
+    best, best_err = None, None
+    for i in range(-6, 7):
+        th = max(multiple, th0 + i * multiple)
+        tw0 = round_to_multiple(target_px / th, multiple)
+        for j in range(-3, 4):
+            tw = max(multiple, tw0 + j * multiple)
+            err = abs(tw * th - target_px) / target_px + abs(math.log((tw / th) / aspect))
+            if best_err is None or err < best_err:
+                best, best_err = (tw, th), err
+    return best
+
+
 def plan_crop(H, W, bbox, *, context_scale=1.3, context_pixels=32, size_mode="megapixels", megapixels=2.0,
-              longest_side=1536, fixed_width=1024, fixed_height=1024, multiple=16, max_upscale=4.0):
+              longest_side=1536, fixed_width=1024, fixed_height=1024, multiple=16, max_upscale=4.0,
+              mp_unit="binary", shape="region"):
     """Integer crop box + model size + the exact scale factors. The box may extend past the image (padded later)."""
     x0, y0, x1, y1 = bbox
     bw, bh = x1 - x0, y1 - y0
@@ -140,6 +157,8 @@ def plan_crop(H, W, bbox, *, context_scale=1.3, context_pixels=32, size_mode="me
     rw = max(bw * float(context_scale), bw + 2.0 * context_pixels, 1.0)
     rh = max(bh * float(context_scale), bh + 2.0 * context_pixels, 1.0)
 
+    if str(shape).startswith("square") and size_mode != "fixed":
+        rw = rh = max(rw, rh)                                    # square crop: the region is centred in a square box
     if size_mode == "native (no resize)":
         tw, th = ceil_to_multiple(rw, multiple), ceil_to_multiple(rh, multiple)
         box_w, box_h = tw, th
@@ -155,9 +174,18 @@ def plan_crop(H, W, bbox, *, context_scale=1.3, context_pixels=32, size_mode="me
             if size_mode == "longest_side":
                 s = float(longest_side) / max(rw, rh)
             else:
-                s = math.sqrt(float(megapixels) * 1e6 / (rw * rh))
+                target = float(megapixels) * (1048576.0 if str(mp_unit).startswith("binary") else 1e6)
+                s = math.sqrt(target / (rw * rh))
+            if size_mode == "megapixels" and s > float(max_upscale):
+                grow = s / float(max_upscale)                    # tiny edit region: take in more surroundings instead of
+                rw, rh = rw * grow, rh * grow                    # upscaling past max_upscale, so the requested size is still met
+                s = float(max_upscale)
             s = min(s, float(max_upscale))
-            tw, th = round_to_multiple(rw * s, multiple), round_to_multiple(rh * s, multiple)
+            if size_mode == "megapixels":
+                tw, th = fit_megapixels(target, rw / rh, multiple)   # the multiple-of-N size nearest the requested pixel count
+                s = math.sqrt(tw * th / (rw * rh))
+            else:
+                tw, th = round_to_multiple(rw * s, multiple), round_to_multiple(rh * s, multiple)
         box_w, box_h = max(1, round(tw / s)), max(1, round(th / s))
     box_w, box_h = max(box_w, bw), max(box_h, bh)               # the box always contains the whole edit region
 
@@ -587,7 +615,7 @@ def crop(image, mask, *, threshold=0.01, fill_holes=True, grow=0, edge_pad="refl
     st = {"bypass": False, "original": img, "core": core, "soft": m.clamp(0, 1), "plan": plan, "edge_pad": edge_pad,
           "H": H, "W": W, "threshold": threshold, "bars": bars}
     info = (f"{note}mask box {bbox[2]-bbox[0]}x{bbox[3]-bbox[1]} at ({bbox[0]},{bbox[1]}); crop box {plan['bw']}x{plan['bh']} at "
-            f"({plan['x']},{plan['y']}) -> model size {plan['tw']}x{plan['th']} (scale {plan['sx']:.4f} x {plan['sy']:.4f}); "
+            f"({plan['x']},{plan['y']}) -> model size {plan['tw']}x{plan['th']} = {plan['tw'] * plan['th'] / 1048576:.2f} MP (scale {plan['sx']:.4f} x {plan['sy']:.4f}); "
             f"padding l/t/r/b {plan['pad']}")
     if any(sum(bb[:4]) for bb in bars):
         t_, b_, l_, r_, _ = bars[0]

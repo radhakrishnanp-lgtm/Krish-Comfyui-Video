@@ -28,6 +28,8 @@ class KrishInpaintCrop:
             "max_upscale": ("FLOAT", {"default": 4.0, "min": 1.0, "max": 16.0, "step": 0.5, "tooltip": "Largest enlargement for small crops."}),
             "edge_pad": (["reflect", "replicate"], {"tooltip": "How to fill the part of the crop box that leaves the image."}),
             "resample": (ic.RESAMPLE, {"tooltip": "Filter used to resize. Shrinking is always antialiased."}),
+            "megapixel_unit": (["binary (1 MP = 1024x1024)", "decimal (1 MP = 1,000,000 px)"], {"tooltip": "How megapixels are counted. binary: 2 MP = 2,097,152 px (2048x1024, 1448x1448). The model size is the multiple-of-16 size closest to it, with the crop's aspect ratio."}),
+            "crop_shape": (["same as edit region", "square"], {"tooltip": "square: the crop box is made square (the edit region stays centred in it), so 2 MP gives 1456x1456 whatever the region's shape."}),
         }}
 
     RETURN_TYPES = ("KRISH_STITCHER", "IMAGE", "MASK", "IMAGE", "STRING")
@@ -36,12 +38,13 @@ class KrishInpaintCrop:
     CATEGORY = CATEGORY
 
     def run(self, image, mask, mask_threshold, fill_holes, mask_grow, context_scale, context_pixels, size_mode, megapixels,
-            longest_side, fixed_width, fixed_height, size_multiple, max_upscale, edge_pad, resample):
+            longest_side, fixed_width, fixed_height, size_multiple, max_upscale, edge_pad, resample,
+            megapixel_unit="binary (1 MP = 1024x1024)", crop_shape="same as edit region"):
         st, cropped, cmask, info = ic.crop(
             image, mask, threshold=mask_threshold, fill_holes=fill_holes, grow=mask_grow, edge_pad=edge_pad,
             resample=resample, context_scale=context_scale, context_pixels=context_pixels, size_mode=size_mode,
             megapixels=megapixels, longest_side=longest_side, fixed_width=fixed_width, fixed_height=fixed_height,
-            multiple=size_multiple, max_upscale=max_upscale)
+            multiple=size_multiple, max_upscale=max_upscale, mp_unit=megapixel_unit, shape=crop_shape)
         print("[KrishInpaint] " + info)
         return (st, cropped, cmask, ic.preview_overlay(st["original"], st), info)
 
