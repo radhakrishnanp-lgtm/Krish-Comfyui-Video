@@ -40,7 +40,7 @@ c_old = {o["name"]: o.get("links") for o in crop["outputs"]}
 retype(crop, "KrishInpaintCrop", "Krish Inpaint Crop", c_in,
        [out("stitcher", "KRISH_STITCHER", c_old["stitcher"]), out("cropped_image", "IMAGE", c_old["cropped_image"]),
         out("cropped_mask", "MASK", c_old["cropped_mask"]), out("preview", "IMAGE", []), out("info", "STRING", [])],
-       [0.01, True, 0, 1.3, 32, "megapixels", 2.0, 1536, 1024, 1024, 16, 4.0, "reflect", "bicubic", "binary (1 MP = 1024x1024)", "same as edit region"], [380, 520])
+       [0.01, True, 0, 1.3, 32, "square (value x 1024)", 2.0, 1536, 1024, 1024, 16, 4.0, "reflect", "bicubic", "binary (1 MP = 1024x1024)", "same as edit region"], [380, 520])
 
 # ---- stitch (stitcher / inpainted_image keep their links; image output keeps its links)
 s_old = {o["name"]: o.get("links") for o in stitch["outputs"]}
@@ -99,7 +99,7 @@ new_node("Note", [1232, -260], [640, 330], [],
           "- Stitch: pixels outside the blend are the ORIGINAL pixels (bit for bit). The blend follows the mask shape (feather 'auto' = 10% of the mask size, exactly 0 beyond it).\n"
           "- Qwen re-renders the whole crop, so it drifts a little: the stitch measures a sub-pixel shift and a smooth colour/brightness difference on the UNTOUCHED surroundings and corrects them before blending (align / color_match; the Stitch report shows what was applied).\n"
           "- For pixel-exact work without any resize set size_mode to 'native (no resize)'.\n"
-          "- Needs Krish-Comfyui-Video 0.6.4+ (console: '... inpaint nodes: yes')."],
+          "- Needs Krish-Comfyui-Video 0.6.5+ (console: '... inpaint nodes: yes')."],
          "READ ME (inpaint)", ("#432", "#653"))
 
 d["links"] = sorted(links.values(), key=lambda l: l[0])

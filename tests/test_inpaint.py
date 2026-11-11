@@ -449,3 +449,16 @@ def test_megapixels_mode_hits_the_requested_size_for_any_input_size(mp, shape, s
 def test_two_megapixels_binary_is_2048_by_1024_for_a_2_to_1_region():
     plan = ic.plan_crop(2304, 4096, (1000, 600, 1000 + 1200, 600 + 600), size_mode="megapixels", megapixels=2.0, context_scale=1.0, context_pixels=0)
     assert (plan["tw"], plan["th"]) == (2048, 1024)
+
+
+@pytest.mark.parametrize("value,side", [(1.0, 1024), (2.0, 2048), (4.0, 4096), (0.5, 512)])
+@pytest.mark.parametrize("size", [(1920, 1080), (4096, 2304), (16384, 8192)])
+@pytest.mark.parametrize("mbox", [(0.1, 0.1, 0.4, 0.5), (0.5, 0.2, 0.52, 0.24), (0.0, 0.0, 1.0, 1.0)])
+def test_square_mode_is_value_times_1024_square(value, side, size, mbox):
+    W, H = size
+    x0, y0 = int(mbox[0] * W), int(mbox[1] * H)
+    x1, y1 = max(int(mbox[2] * W), x0 + 8), max(int(mbox[3] * H), y0 + 8)
+    plan = ic.plan_crop(H, W, (x0, y0, x1, y1), size_mode="square (value x 1024)", megapixels=value)
+    assert (plan["tw"], plan["th"]) == (side, side)
+    assert plan["bw"] >= x1 - x0 and plan["bh"] >= y1 - y0
+    assert abs(plan["sx"] / plan["sy"] - 1) < 0.01 or min(plan["bw"], plan["bh"]) < 64

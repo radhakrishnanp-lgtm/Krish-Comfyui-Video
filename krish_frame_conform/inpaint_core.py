@@ -128,7 +128,7 @@ def mask_bbox(core_bhw):
 
 
 # ------------------------------------------------------------------ geometry plan
-SIZE_MODES = ["megapixels", "longest_side", "fixed", "native (no resize)"]
+SIZE_MODES = ["square (value x 1024)", "megapixels", "longest_side", "fixed", "native (no resize)"]
 
 
 def fit_megapixels(target_px, aspect, multiple):
@@ -157,13 +157,21 @@ def plan_crop(H, W, bbox, *, context_scale=1.3, context_pixels=32, size_mode="me
     rw = max(bw * float(context_scale), bw + 2.0 * context_pixels, 1.0)
     rh = max(bh * float(context_scale), bh + 2.0 * context_pixels, 1.0)
 
-    if str(shape).startswith("square") and size_mode != "fixed":
+    if str(shape).startswith("square") and size_mode not in ("fixed",):
         rw = rh = max(rw, rh)                                    # square crop: the region is centred in a square box
     if size_mode == "native (no resize)":
         tw, th = ceil_to_multiple(rw, multiple), ceil_to_multiple(rh, multiple)
         box_w, box_h = tw, th
     else:
-        if size_mode == "fixed":
+        if str(size_mode).startswith("square"):
+            side = max(multiple, round_to_multiple(float(megapixels) * 1024.0, multiple))   # 1 -> 1024x1024, 2 -> 2048x2048, 4 -> 4096x4096
+            rw = rh = max(rw, rh)
+            s = side / rw
+            if s > float(max_upscale):                           # tiny region: take in more surroundings instead
+                rw = rh = rw * s / float(max_upscale)
+                s = side / rw
+            tw = th = side
+        elif size_mode == "fixed":
             tw, th = round_to_multiple(fixed_width, multiple), round_to_multiple(fixed_height, multiple)
             if rw / rh > tw / th:           # region too wide for the target shape: grow its height
                 rh = rw * th / tw
