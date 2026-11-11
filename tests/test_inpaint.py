@@ -403,3 +403,29 @@ def test_no_bars_means_no_change_in_behaviour():
     a, _, _ = ic.stitch(st, crop * 0.9, protect_letterbox=True)
     b, _, _ = ic.stitch(st, crop * 0.9, protect_letterbox=False)
     assert torch.equal(a, b)
+
+
+def test_large_model_drift_is_corrected_by_default():
+    """A 20 px shift of the whole result (Qwen on a big plate) must be undone by the default settings."""
+    img, st, _ = _letterbox_case(shift=0, tilt_deg=0.0)
+    img2 = img.clone()
+    img2[:, :40] = 0.3; img2[:, -40:] = 0.3                      # plain textured plate, no bars
+    mask = torch.zeros(1, 800, 1200); mask[:, 200:450, 300:800] = 1
+    st, crop, cm, _ = ic.crop(img2, mask, size_mode="native")
+    h, w = crop.shape[1:3]
+    ys, xs = torch.meshgrid(torch.arange(h, dtype=torch.float32), torch.arange(w, dtype=torch.float32), indexing="ij")
+    grid = torch.stack([(xs - 3 + 0.5) / w * 2 - 1, (ys + 20 + 0.5) / h * 2 - 1], -1)[None]
+    gen = torch.nn.functional.grid_sample(crop.permute(0, 3, 1, 2), grid, mode="bicubic", padding_mode="border", align_corners=False).permute(0, 2, 3, 1)
+    off, _, _ = ic.stitch(st, gen, align="off", color_match="off")
+    out, _, rep = ic.stitch(st, gen, color_match="off")
+    assert "aligned the result" in rep
+    assert _ring_err(out, img2, st) < _ring_err(off, img2, st) * 0.4
+
+
+def test_mask_aspect_mismatch_is_flagged():
+    img = torch.rand(1, 230, 410, 3)
+    mask = torch.zeros(1, 246, 384); mask[:, 40:120, 40:200] = 1
+    _, _, _, info = ic.crop(img, mask)
+    assert "WARNING" in info and "STRETCHED" in info
+    _, _, _, info2 = ic.crop(img, torch.zeros(1, 230, 410).index_fill_(1, torch.arange(10, 50), 1.0))
+    assert "WARNING" not in info2

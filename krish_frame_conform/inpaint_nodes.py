@@ -58,7 +58,7 @@ class KrishInpaintStitch:
             "feather_mode": (["auto", "pixels"],),
             "feather_pixels": ("INT", {"default": 24, "min": 0, "max": 512, "tooltip": "Used when feather_mode is pixels."}),
             "align": (["affine", "translation", "off"], {"tooltip": "Measure and remove the small shift, zoom and rotation the model introduced, using the untouched surroundings (sub-pixel). translation = shift only."}),
-            "max_shift_px": ("INT", {"default": 12, "min": 1, "max": 256, "tooltip": "Larger shifts are not corrected (probably not a model drift)."}),
+            "max_shift_px": ("INT", {"default": 64, "min": 1, "max": 512, "tooltip": "Largest correction applied, in original-image pixels at the crop box corners. Edit models can drift 10-30 px on a large plate."}),
             "color_match": (["low_frequency", "off"], {"tooltip": "Smooth colour/brightness correction learned on the untouched surroundings and extended into the edit."}),
             "color_amount": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05}),
             "resample": (ic.RESAMPLE,),

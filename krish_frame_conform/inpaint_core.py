@@ -567,6 +567,9 @@ def crop(image, mask, *, threshold=0.01, fill_holes=True, grow=0, edge_pad="refl
     m = to_bhw(mask).float()
     if m.shape[1:] != (H, W):
         note = f"mask resized from {m.shape[2]}x{m.shape[1]} to {W}x{H}. "
+        if abs((m.shape[2] / m.shape[1]) / (W / H) - 1.0) > 0.01:
+            note = (f"WARNING: the mask is {m.shape[2]}x{m.shape[1]} but the image is {W}x{H} - a different aspect ratio, so the mask is "
+                    f"STRETCHED and will not line up with the picture. Export the mask at the image size. ")
         m = resize_mask(m, H, W)
     if m.shape[0] not in (1, B):
         m = m[:1]
@@ -593,7 +596,7 @@ def crop(image, mask, *, threshold=0.01, fill_holes=True, grow=0, edge_pad="refl
 
 
 def stitch(stitcher, generated, *, blend_mode="mask_feather", feather_mode="auto", feather_pixels=24, align="affine",
-           max_shift_px=12, min_shift_px=0.05, min_confidence=0.08, color_match="low_frequency", color_amount=1.0,
+           max_shift_px=64, min_shift_px=0.05, min_confidence=0.08, color_match="low_frequency", color_amount=1.0,
            color_sigma=0, ring_margin=0, resample="bicubic", protect_letterbox=True):
     """Returns (image, blend_mask [B,H,W], report str)."""
     orig = stitcher["original"]
@@ -626,7 +629,7 @@ def stitch(stitcher, generated, *, blend_mode="mask_feather", feather_mode="auto
         if align == "affine":
             tx, ty, mm, conf, gain, mx = estimate_warp(orig_box, gen_box, ring)
             mag = max(math.hypot(tx, ty), mx)
-            if (conf >= min_confidence or gain >= 0.15) and gain >= 0.05 and min_shift_px <= mag <= max_shift_px * 1.5:
+            if (conf >= min_confidence or gain >= 0.15) and gain >= 0.05 and min_shift_px <= mag <= max_shift_px:
                 gen_box = warp_affine(gen_box, tx, ty, mm)
                 zoom = 1.0 + 0.5 * (mm[0] / (bw / 2) + mm[3] / (bh / 2))
                 rot = math.degrees(0.5 * (mm[2] / (bw / 2) - mm[1] / (bh / 2)))
