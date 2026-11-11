@@ -46,7 +46,7 @@ retype(crop, "KrishInpaintCrop", "Krish Inpaint Crop", c_in,
 s_old = {o["name"]: o.get("links") for o in stitch["outputs"]}
 retype(stitch, "KrishInpaintStitch", "Krish Inpaint Stitch", [dict(i) for i in stitch["inputs"]],
        [out("image", "IMAGE", s_old["image"]), out("blend_mask", "MASK", []), out("report", "STRING", [])],
-       ["mask_feather", "auto", 24, "affine", 12, "low_frequency", 1.0, "bicubic"], [330, 300])
+       ["mask_feather", "auto", 24, "affine", 12, "low_frequency", 1.0, "bicubic", True], [330, 300])
 
 # ---- the rescale node goes; the latent size now comes straight from the exact crop
 del links[16]
@@ -99,7 +99,7 @@ new_node("Note", [1232, -260], [640, 330], [],
           "- Stitch: pixels outside the blend are the ORIGINAL pixels (bit for bit). The blend follows the mask shape (feather 'auto' = 10% of the mask size, exactly 0 beyond it).\n"
           "- Qwen re-renders the whole crop, so it drifts a little: the stitch measures a sub-pixel shift and a smooth colour/brightness difference on the UNTOUCHED surroundings and corrects them before blending (align / color_match; the Stitch report shows what was applied).\n"
           "- For pixel-exact work without any resize set size_mode to 'native (no resize)'.\n"
-          "- Needs Krish-Comfyui-Video 0.6.1+ (console: '... inpaint nodes: yes')."],
+          "- Needs Krish-Comfyui-Video 0.6.2+ (console: '... inpaint nodes: yes')."],
          "READ ME (inpaint)", ("#432", "#653"))
 
 d["links"] = sorted(links.values(), key=lambda l: l[0])

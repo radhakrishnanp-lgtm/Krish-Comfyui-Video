@@ -488,6 +488,76 @@ def lowfreq_correction(orig_box, gen_box, weight_bhw, sigma_px):
     return field.permute(0, 2, 3, 1)
 
 
+# ------------------------------------------------------------------ letterbox protection
+def detect_bars(img_bhwc, flat_tol=0.004, dark_max=0.05, max_frac=0.4):
+    """Flat dark letterbox / pillarbox bars of the first image: (top, bottom, left, right, level) in pixels.
+
+    A bar is a run of rows / columns, counted from the border, whose pixels are all (nearly) the same dark value."""
+    x = img_bhwc[0].float()
+    H, W, _ = x.shape
+
+    def run(lines_max, lines_min, lines_mean, limit):
+        n = 0
+        for i in range(limit):
+            if float(lines_max[i] - lines_min[i]) < flat_tol and float(lines_mean[i]) < dark_max:
+                n += 1
+            else:
+                break
+        return 0 if n >= limit else n          # a run that fills the cap is a flat image, not a bar
+
+    rmax, rmin, rmean = x.amax(dim=(1, 2)), x.amin(dim=(1, 2)), x.mean(dim=(1, 2))
+    lim_h = int(H * max_frac)
+    top = run(rmax, rmin, rmean, lim_h)
+    bottom = run(rmax.flip(0), rmin.flip(0), rmean.flip(0), lim_h)
+    pic = x[top:H - bottom] if top + bottom < H else x
+    cmax, cmin, cmean = pic.amax(dim=(0, 2)), pic.amin(dim=(0, 2)), pic.mean(dim=(0, 2))
+    lim_w = int(W * max_frac)
+    left = run(cmax, cmin, cmean, lim_w)
+    right = run(cmax.flip(0), cmin.flip(0), cmean.flip(0), lim_w)
+    level = 0.0
+    if top:
+        level = float(rmean[:top].mean())
+    elif bottom:
+        level = float(rmean[H - bottom:].mean())
+    elif left:
+        level = float(cmean[:left].mean())
+    elif right:
+        level = float(cmean[W - right:].mean())
+    return top, bottom, left, right, level
+
+
+def bar_guard(o, g, bars, x0, y0, H, W, margin=4, ramp=6, band_frac=0.02):
+    """Multiplier [1,h,w] for the blend alpha so letterbox bars survive exactly.
+
+    o / g are the original and the model result for the image region starting at (x0, y0). Inside a bar the multiplier is 0
+    (original kept bit-exact). The model often draws a bar edge a few pixels off, bleeding black into the picture (or
+    picture into the bar): wherever the result is bar-black but the original is not, the blend is held back from the
+    bar edge out to that distance plus `margin`, then eased in over `ramp` pixels."""
+    top, bottom, left, right, level = bars
+    h, w = o.shape[1:3]
+    lo, lg = _luma(o), _luma(g)
+    ys = torch.arange(h, device=o.device, dtype=torch.float32)[:, None] + y0
+    xs = torch.arange(w, device=o.device, dtype=torch.float32)[None, :] + x0
+    band = max(16, int(band_frac * min(H, W)))
+    dark = (lg < level + 0.015) & (lo > level + 0.03)
+    mult = torch.ones((1, h, w), device=o.device)
+    sides = [(top, (ys - top).expand(h, w)), (bottom, ((H - 1 - bottom) - ys).expand(h, w)),
+             (left, (xs - left).expand(h, w)), (right, ((W - 1 - right) - xs).expand(h, w))]
+    for extent, dist in sides:
+        if extent <= 0:
+            continue
+        d = dist[None]
+        hit = dark & (d >= 0) & (d < band)
+        reach = int(d[hit].max()) + 1 if bool(hit.any()) else 0
+        if reach > 0:
+            t = ((d - (reach + margin)) / float(ramp)).clamp(0, 1)
+            m = torch.where(d < 0, torch.zeros_like(t), t * t * (3 - 2 * t))
+        else:
+            m = (d >= 0).float()
+        mult = mult * m
+    return mult
+
+
 # ------------------------------------------------------------------ crop + stitch
 def crop(image, mask, *, threshold=0.01, fill_holes=True, grow=0, edge_pad="reflect", resample="bicubic", **plan_kw):
     """Returns (stitcher dict, cropped_image, cropped_mask, info str). stitcher is None-like (bypass) for an empty mask."""
@@ -510,17 +580,21 @@ def crop(image, mask, *, threshold=0.01, fill_holes=True, grow=0, edge_pad="refl
     box = extract_box(img, plan, edge_pad)
     cropped = resize_img(box, plan["th"], plan["tw"], resample)
     cmask = resize_mask(extract_box_mask(core, plan), plan["th"], plan["tw"])
+    bars = [detect_bars(img[i:i + 1]) for i in range(B)]
     st = {"bypass": False, "original": img, "core": core, "soft": m.clamp(0, 1), "plan": plan, "edge_pad": edge_pad,
-          "H": H, "W": W, "threshold": threshold}
+          "H": H, "W": W, "threshold": threshold, "bars": bars}
     info = (f"{note}mask box {bbox[2]-bbox[0]}x{bbox[3]-bbox[1]} at ({bbox[0]},{bbox[1]}); crop box {plan['bw']}x{plan['bh']} at "
             f"({plan['x']},{plan['y']}) -> model size {plan['tw']}x{plan['th']} (scale {plan['sx']:.4f} x {plan['sy']:.4f}); "
             f"padding l/t/r/b {plan['pad']}")
+    if any(sum(bb[:4]) for bb in bars):
+        t_, b_, l_, r_, _ = bars[0]
+        info += f"; letterbox bars detected (top {t_}, bottom {b_}, left {l_}, right {r_} px): kept exactly"
     return st, cropped, cmask, info
 
 
 def stitch(stitcher, generated, *, blend_mode="mask_feather", feather_mode="auto", feather_pixels=24, align="affine",
            max_shift_px=12, min_shift_px=0.05, min_confidence=0.08, color_match="low_frequency", color_amount=1.0,
-           color_sigma=0, ring_margin=0, resample="bicubic"):
+           color_sigma=0, ring_margin=0, resample="bicubic", protect_letterbox=True):
     """Returns (image, blend_mask [B,H,W], report str)."""
     orig = stitcher["original"]
     B, H, W, C = orig.shape
@@ -578,6 +652,13 @@ def stitch(stitcher, generated, *, blend_mode="mask_feather", feather_mode="auto
         a = alpha[:, oy:oy + (y1 - y0), ox:ox + (x1 - x0)]
         g = gen_box[:, oy:oy + (y1 - y0), ox:ox + (x1 - x0), :]
         o = out[b:b + 1, y0:y1, x0:x1, :]
+        bars = (stitcher.get("bars") or [None] * B)[b]
+        if protect_letterbox and bars is not None and sum(bars[:4]) > 0:
+            gm = bar_guard(o, g, bars, x0, y0, H, W, margin=max(4, feather // 4))
+            if float(gm.min()) < 1.0:
+                a = a * gm
+                lines.append(f"[{b}] letterbox kept exact; blend held back from the bar edge by up to "
+                             f"{int((gm[0] < 0.5).float().sum(dim=0).max())} px")
         blended = o + a.unsqueeze(-1) * (g - o)                      # lerp form: identical content stays bit-identical
         out[b:b + 1, y0:y1, x0:x1, :] = torch.where(a.unsqueeze(-1) > 0, blended, o)
         alpha_full[b, y0:y1, x0:x1] = a[0]

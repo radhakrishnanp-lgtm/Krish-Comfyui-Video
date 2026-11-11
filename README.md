@@ -160,6 +160,7 @@ InpaintCropImproved, so it drops in).
 **Krish Inpaint Stitch** (`stitcher`, `inpainted_image`) -> `image`, `blend_mask`, `report`.
 - blend follows the **mask shape**: 1 inside, a smoothstep falloff outward (`feather` auto = 10% of the mask size), exactly 0 beyond it
   (`box_feather` and `hard` are also available). The whole crop box is not replaced, only the mask plus its feather
+- `protect_letterbox` (default on): flat black letterbox / pillarbox bars are detected on the original and kept bit-exact. Models redraw the bar edge a few pixels off, which pastes a black wedge into the picture (or picture into the bar); the blend is held back from the bar edge out to wherever the result bled, then eased in. Reported in the Crop info and the Stitch report.
 - `align` (`affine` default, `translation`, `off`): edit models re-render the crop slightly shifted, and often a fraction of a percent zoomed or rotated; `affine` fits all three. Measured on a simulated Qwen-style result: naive paste 0.0166 seam error, translation only 0.0065, affine 0.0019. Previously: edit models re-render the crop slightly shifted. The shift is measured on the untouched surroundings (phase correlation
   refined to a few hundredths of a pixel, robust to gain/offset/noise) and removed; applied only if it measurably reduces the mismatch
 - `color_match`: a smooth per-channel offset learned on the untouched surroundings and extended into the edit, so brightness and colour

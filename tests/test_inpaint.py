@@ -357,3 +357,49 @@ def test_affine_alignment_is_a_noop_on_identical_content():
     p = st["plan"]
     outside = st["core"][0] == 0
     assert torch.equal(out[0][outside][:1], img[0][outside][:1])
+
+
+# ---- letterbox protection (model draws the bar edge a few pixels off -> black wedge in the picture)
+def _letterbox_case(shift=9, tilt_deg=0.3):
+    g = torch.Generator().manual_seed(7)
+    n = torch.nn.functional.avg_pool2d(torch.rand(1, 3, 808, 1208, generator=g), 7, 1, 3)[:, :, 4:-4, 4:-4]
+    img = (n * 0.6 + 0.2).permute(0, 2, 3, 1).contiguous()
+    img[:, :40] = -0.014
+    img[:, -40:] = -0.014
+    mask = torch.zeros(1, 800, 1200); mask[:, 30:300, 400:900] = 1
+    st, crop, cm, _ = ic.crop(img, mask, size_mode="native")
+    h, w = crop.shape[1:3]
+    ys, xs = torch.meshgrid(torch.arange(h, dtype=torch.float32), torch.arange(w, dtype=torch.float32), indexing="ij")
+    sy = ys - shift - (xs - w / 2) * math.tan(math.radians(tilt_deg))
+    grid = torch.stack([(xs + 0.5) / w * 2 - 1, (sy + 0.5) / h * 2 - 1], -1)[None]
+    gen = torch.nn.functional.grid_sample(crop.permute(0, 3, 1, 2), grid, mode="bicubic", padding_mode="border", align_corners=False).permute(0, 2, 3, 1)
+    return img, st, gen
+
+
+def test_detect_bars():
+    img, st, _ = _letterbox_case()
+    t, b, l, r, level = ic.detect_bars(img)
+    assert (t, b, l, r) == (40, 40, 0, 0) and abs(level + 0.014) < 1e-6
+    assert ic.detect_bars(torch.rand(1, 64, 64, 3))[:4] == (0, 0, 0, 0)
+    assert ic.detect_bars(torch.zeros(1, 64, 64, 3))[:4] == (0, 0, 0, 0)          # all black: not a bar
+
+
+@pytest.mark.parametrize("align", ["off", "affine"])
+def test_letterbox_stays_exact_and_no_black_wedge(align):
+    img, st, gen = _letterbox_case()
+    out, _, rep = ic.stitch(st, gen, align=align)
+    assert torch.equal(out[:, :40], img[:, :40]) and torch.equal(out[:, -40:], img[:, -40:])
+    bled = ((out[0, 40:140, 400:900].mean(-1) < 0.02) & (img[0, 40:140, 400:900].mean(-1) > 0.1)).sum()
+    assert int(bled) == 0
+    out2, _, _ = ic.stitch(st, gen, align="off", protect_letterbox=False)
+    assert int(((out2[0, 40:140, 400:900].mean(-1) < 0.02) & (img[0, 40:140, 400:900].mean(-1) > 0.1)).sum()) > 0   # the bug it prevents
+
+
+def test_no_bars_means_no_change_in_behaviour():
+    g = torch.Generator().manual_seed(1)
+    img = torch.rand(1, 200, 300, 3, generator=g) * 0.5 + 0.2
+    mask = torch.zeros(1, 200, 300); mask[:, 50:120, 80:200] = 1
+    st, crop, _, _ = ic.crop(img, mask, size_mode="native")
+    a, _, _ = ic.stitch(st, crop * 0.9, protect_letterbox=True)
+    b, _, _ = ic.stitch(st, crop * 0.9, protect_letterbox=False)
+    assert torch.equal(a, b)

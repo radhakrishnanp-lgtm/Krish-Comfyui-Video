@@ -62,6 +62,7 @@ class KrishInpaintStitch:
             "color_match": (["low_frequency", "off"], {"tooltip": "Smooth colour/brightness correction learned on the untouched surroundings and extended into the edit."}),
             "color_amount": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05}),
             "resample": (ic.RESAMPLE,),
+            "protect_letterbox": ("BOOLEAN", {"default": True, "tooltip": "Detect flat black letterbox / pillarbox bars and keep them bit-exact; the blend is held back where the model moved the bar edge (a black wedge bleeding into the picture)."}),
         }}
 
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
@@ -70,10 +71,11 @@ class KrishInpaintStitch:
     CATEGORY = CATEGORY
 
     def run(self, stitcher, inpainted_image, blend_mode, feather_mode, feather_pixels, align, max_shift_px, color_match,
-            color_amount, resample):
+            color_amount, resample, protect_letterbox=True):
         out, alpha, report = ic.stitch(
             stitcher, inpainted_image, blend_mode=blend_mode, feather_mode=feather_mode, feather_pixels=feather_pixels,
-            align=align, max_shift_px=max_shift_px, color_match=color_match, color_amount=color_amount, resample=resample)
+            align=align, max_shift_px=max_shift_px, color_match=color_match, color_amount=color_amount, resample=resample,
+            protect_letterbox=protect_letterbox)
         print("[KrishInpaint] " + report)
         return (out, alpha, report)
 

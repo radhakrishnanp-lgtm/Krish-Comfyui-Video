@@ -72,4 +72,4 @@ def test_pack_exposes_the_download_extension():
 def test_pack_reports_its_version_and_nodes(capsys):
     _pack()
     out = capsys.readouterr().out
-    assert "Krish-Comfyui-Video 0.6.1" in out and "merge node: yes" in out and "download endpoint:" in out
+    assert "Krish-Comfyui-Video 0.6.2" in out and "merge node: yes" in out and "download endpoint:" in out
